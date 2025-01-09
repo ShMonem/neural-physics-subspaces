@@ -8,13 +8,16 @@ from rigid3d_model import Rigid3DSystem
 ### Set up the argument parser
 
 def add_system_args(parser):
-    parser.add_argument("--system_name", type=str, required=True)
-    parser.add_argument("--problem_name", type=str, required=True)
+    # TODO: arguments are fixed for now only for debugging purpose!
+    # parser.add_argument("--system_name", type=str, required=True)
+    # parser.add_argument("--problem_name", type=str, required=True)
+    parser.add_argument("--system_name", type=str, default="rigid3d")   # adjust --
+    parser.add_argument("--problem_name", type=str, default="bar")    # adjust --
     parser.add_argument("--timestep_h", type=float, default=0.05)
 
 def add_learning_args(parser):
-    parser.add_argument("--MLP_hidden_layers", type=int, default=5)
-    parser.add_argument("--MLP_hidden_layer_width", type=int, default=64)
+    parser.add_argument("--MLP_hidden_layers", type=int, default=5)     # adjust --
+    parser.add_argument("--MLP_hidden_layer_width", type=int, default=64)    # adjust --
 
 def add_training_args(parser):
     parser.add_argument("--run_name", type=str, default="training")

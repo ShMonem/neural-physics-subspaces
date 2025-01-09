@@ -13,7 +13,7 @@ import equinox as eqx
 
 import polyscope as ps
 import polyscope.imgui as psim
-
+from jax import debug
 # import igl
 
 # Imports from this project
@@ -23,7 +23,10 @@ import config, layers, integrators, subspace
 SRC_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT_DIR = os.path.join(SRC_DIR, "..")
 
-
+FRAME = 1
+RECORD_FRAME = False
+RECORD_SNAPSHOTS = True
+NUM_SNAPSHOTS = 100000
 def main():
 
     # Build command line arguments
@@ -35,7 +38,7 @@ def main():
 
     # Arguments specific to this program
     parser.add_argument("--integrator", type=str, default = "implicit-proximal")
-    parser.add_argument("--subspace_model", type=str)
+    parser.add_argument("--subspace_model", type=str)#, default = "../output/klann/neural_subspace_Cos_rigid3d_klann_normal_dim4_wexp1_final")
 
     # Parse arguments
     args = parser.parse_args()
@@ -162,11 +165,21 @@ def main():
     #########################################################################
 
     def main_loop():
+        global FRAME, RECORD_FRAME, RECORD_SNAPSHOTS, NUM_SNAPSHOTS
+        # set the camera pose explicitly
+        # ps.look_at((0., 0., 0.5), (0.01, 0.05, 0.2))
+        if RECORD_FRAME:
+            # Adjust some screenshot default settings if you'd like
+            ps.set_screenshot_extension(".png")
+            utils.ensure_dir_exists(os.path.join("../output", args.problem_name, "subspace_frames"))
+            utils.ensure_dir_exists(os.path.join("../output", args.problem_name, "full_frames"))
+        if RECORD_SNAPSHOTS:
+            utils.ensure_dir_exists(os.path.join("../output", args.problem_name, "snapshots"))
+
 
         nonlocal int_opts, int_state, run_sim, base_latent, update_viz_every, eval_energy_every
 
         # Define the GUI
-
         # some latent sliders
         if use_subspace:
 
@@ -198,11 +211,17 @@ def main():
         # Helpers to build other parts of the UI
         integrators.build_ui(int_opts, int_state)
         system.build_system_ui(system_def)
-            
 
         # update visualization every frame
         if update_viz_every or run_sim:
             system.visualize(system_def, state_to_system(system_def, int_state['q_t']))
+            if run_sim and RECORD_FRAME:
+                if use_subspace:
+                    ps.screenshot(filename=os.path.join("../output", args.problem_name, "subspace_frames", f"frame_reduced_oneJoint_sameSize_z_q{FRAME:05d}.png"))
+                else:
+                    ps.screenshot(
+                        filename=os.path.join("../output", args.problem_name, "full_frames", f"frame_full_oneBar{FRAME:05d}.png"))
+                FRAME +=1
 
         # print energy
         if eval_energy_every:
@@ -234,7 +253,13 @@ def main():
                                              int_state,
                                              int_opts,
                                              subspace_fn=subspace_fn,
-                                             subspace_domain_dict=subspace_domain_dict)
+                                             subspace_domain_dict=subspace_domain_dict,
+                                             collect_velo_snapshots = RECORD_SNAPSHOTS,
+                                             file_name= os.path.join("../output", args.problem_name, "snapshots", f"snapshot{FRAME:05d}") )
+            if RECORD_SNAPSHOTS:
+                FRAME +=1
+                if FRAME >= NUM_SNAPSHOTS:
+                    RECORD_SNAPSHOTS = False
 
     ps.set_user_callback(main_loop)
     ps.show()

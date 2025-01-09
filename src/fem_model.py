@@ -333,7 +333,7 @@ class FEMSystem:
 
         if problem_name == 'bistable':
 
-            mesh = load_tri_mesh( os.path.join(".", "data", "longerCantileverP2" ) )
+            mesh = load_tri_mesh( os.path.join("..", "data", "longerCantileverP2" ) )
             mesh["Vrest"][:,1] = 0.5 * mesh["Vrest"][:,1]
 
             mesh = precompute_mesh(mesh)

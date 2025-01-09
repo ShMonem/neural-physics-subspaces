@@ -46,20 +46,20 @@ def main():
     config.add_jax_args(parser)
 
     ###  Arguments specific to this program
-    parser.add_argument("--output_dir", type=str, default="output")
+    parser.add_argument("--output_dir", type=str, default="../output")
     parser.add_argument("--output_prefix", type=str, default="")
 
     # network defaults
     parser.add_argument("--model_type", type=str, default='SubspaceMLP')
-    parser.add_argument("--activation", type=str, default='ELU')
+    parser.add_argument("--activation", type=str, default='Cos')
 
     # subspace
-    parser.add_argument("--subspace_dim", type=int, default=6)
+    parser.add_argument("--subspace_dim", type=int, default=4)        # adjust --
     parser.add_argument("--subspace_domain_type", type=str, default='normal')
 
     # loss weights / style / params
-    parser.add_argument("--sigma_scale", type=float)
-    parser.add_argument("--weight_expand", type=float)
+    parser.add_argument("--sigma_scale", type=float, default=1.0)     # adjust --
+    parser.add_argument("--weight_expand", type=float, default=1.0)   # adjust --
     parser.add_argument("--expand_type", type=str, default="iso")
 
     # Parse arguments
@@ -82,7 +82,7 @@ def main():
 
     # Build an informative output name
 
-    network_filename_base = f"{args.output_prefix}neural_subspace_{args.system_name}_{args.problem_name}_{args.subspace_domain_type}_dim{args.subspace_dim}_wexp{args.weight_expand:g}"
+    network_filename_base = f"{args.output_prefix}neural_subspace_{args.activation}_{args.system_name}_{args.problem_name}_{args.subspace_domain_type}_dim{args.subspace_dim}_wexp{args.weight_expand:g}"
 
     utils.ensure_dir_exists(args.output_dir)
 
@@ -196,10 +196,10 @@ def main():
                     ex_params))(subkey_b)
 
         expand_loss, repel_stats = batch_repulsion(z_samples, q_samples, t_schedule)
-        expand_loss = expand_loss * args.weight_expand
+        expand_loss = expand_loss * args.weight_expand    # eq(2): impose isometry
 
         loss_dict = {}
-        loss_dict['E_pot'] = E_pots
+        loss_dict['E_pot'] = E_pots   # eq(1): potential energy
         loss_dict['E_expand'] = expand_loss
 
         out_stats_b = {}
@@ -208,7 +208,7 @@ def main():
         # sum up a total loss (mean over batch)
         total_loss = 0.
         for _, v in loss_dict.items():
-            total_loss += jnp.mean(v)
+            total_loss += jnp.mean(v)    # eq(3)
 
         return total_loss, (loss_dict, out_stats_b)
 
@@ -216,11 +216,12 @@ def main():
     def train_step(i_iter, rngkey, ex_params, opt_state):
 
         opt_params = opt.params_fn(opt_state)
+        # optimize for the parameters
         (value, (loss_dict, out_stats_b)), grads = jax.value_and_grad(batch_loss_fn,
                                                                       has_aux=True)(opt_params,
                                                                                     ex_params,
                                                                                     rngkey)
-        opt_state = opt.update_fn(i_iter, grads, opt_state)
+        opt_state = opt.update_fn(i_iter, grads, opt_state)  # eq(4): update the paremeter theta to minimize eq(3)
 
         # out_stats_b currently unused
 
@@ -236,12 +237,13 @@ def main():
     i_save = 0
     mean_scale_log = []
 
-    ## Main training loop
+    ## Main training loop: optimizing the neural network parameters (weights and bias arrays for 5 layers)
     for i_train_iter in range(args.n_train_iters):
 
         ex_params['t_schedule'] = i_train_iter / args.n_train_iters
 
         rngkey, subkey = jax.random.split(rngkey)
+        # optimize for \theta parameters in opt_state(all_params)
         loss, loss_dict, opt_state, out_stats = train_step(i_train_iter, subkey, ex_params,
                                                            opt_state)
 
@@ -260,8 +262,10 @@ def main():
 
         def save_model(this_name):
 
-            network_filename_pre = os.path.join(args.output_dir, network_filename_base) + this_name
-
+            network_filename_pre = os.path.join(args.output_dir , args.problem_name)
+            utils.ensure_dir_exists(network_filename_pre)
+            network_filename_pre = os.path.join(network_filename_pre,
+                                                network_filename_base) + this_name
             print(f"Saving result to {network_filename_pre}")
 
             model = eqx.combine(model_params, model_static)
@@ -272,21 +276,19 @@ def main():
                 network_filename_pre + "_info", {
                     'system': args.system_name,
                     'problem_name': args.problem_name,
+                    'activation': args.activation,
                     'subspace_domain_type': args.subspace_domain_type,
                     'subspace_dim': args.subspace_dim,
                     't_schedule_final': ex_params['t_schedule'],
                 })
 
             print(f"  ...done saving")
-                
 
         if i_train_iter % args.report_every == 0:
 
             print(
                 f"\n== iter {i_train_iter} / {args.n_train_iters}  ({100.*i_train_iter/args.n_train_iters:.2f}%)"
             )
-
-
             # print some statistics
             mean_loss = np.mean(np.array(losses))
             print(f"      loss: {mean_loss:.6f}")

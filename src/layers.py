@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import jaxtyping
-
+from jax import debug
 
 def str_to_act(s):
     d = {

@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-
+from jax import debug
 import numpy as np
 
 import os
@@ -102,14 +102,14 @@ class Rigid3DSystem:
 
         if problem_name == 'klann':
 
-            bodies.append( make_body( os.path.join(".", "data", "klann-red.obj"), 1000, 1.0) )
-            bodies.append( make_body( os.path.join(".", "data", "klann-purple.obj"), 1000, 1.0) )
-            bodies.append( make_body( os.path.join(".", "data", "klann-brown.obj"), 1000, 1.0) )
-            bodies.append( make_body( os.path.join(".", "data", "klann-distal.obj"), 1000, 1.0) )
-            bodies.append( make_body( os.path.join(".", "data", "klann-top.obj"), 1000, 1.0) )
+            bodies.append( make_body( os.path.join("..", "data", "klann-red.obj"), 1000, 1.0) )
+            bodies.append( make_body( os.path.join("..", "data", "klann-purple.obj"), 1000, 1.0) )
+            bodies.append( make_body( os.path.join("..", "data", "klann-brown.obj"), 1000, 1.0) )
+            bodies.append( make_body( os.path.join("..", "data", "klann-distal.obj"), 1000, 1.0) )
+            bodies.append( make_body( os.path.join("..", "data", "klann-top.obj"), 1000, 1.0) )
 
             joint_list.append( make_joint( 0, -1, bodies, jnp.array([ 0,           0.08      ,0.044 ]), jnp.array([ 0, 0.0, 1.0 ]) ) )
-            joint_list.append( make_joint( 0,  1, bodies, jnp.array([-0.046622,    0.097594  ,0.044 ]), jnp.array([ 0, 0.0, 1.0 ]) ) ) 
+            joint_list.append( make_joint( 0,  1, bodies, jnp.array([-0.046622,    0.097594  ,0.044 ]), jnp.array([ 0, 0.0, 1.0 ]) ) )
             joint_list.append( make_joint( 1,  2, bodies, jnp.array([-0.1736,      0.11205   ,0.044 ]), jnp.array([ 0, 0.0, 1.0 ]) ) )
             joint_list.append( make_joint( 1,  3, bodies, jnp.array([-0.31194,     0.16654   ,0.044 ]), jnp.array([ 0, 0.0, 1.0 ]) ) )
             joint_list.append( make_joint( 4, -1, bodies, jnp.array([-0.13,        0.1875    ,0.044 ]), jnp.array([ 0, 0.0, 1.0 ]) ) )
@@ -122,24 +122,36 @@ class Rigid3DSystem:
             system_def['external_forces']['force_strength_y'] = 0.0
             system_def['external_forces']['force_strength_z'] = 0.0
 
+        elif problem_name == "bar":
+            bodies.append(make_body(os.path.join("..", "data", "klann-red.obj"), 1000, 1.0))
+            # bodies.append( make_body( os.path.join("..", "data", "klann-purple.obj"), 1000, 1.0) )
+
+            joint_list.append(make_joint(0, -1, bodies, jnp.array([0, 0.08, 0.044]), jnp.array([0, 0.0, 1.0])))
+            # joint_list.append( make_joint( 0,  1, bodies, jnp.array([-0.046622,    0.097594  ,0.044 ]), jnp.array([ 0, 0.0, 1.0 ]) ) )
+
+            system_def["gravity"] = jnp.array([0.0, -0.98, 0.0])
+            system_def['external_forces']['force_strength_minmax'] = (-10, 10)
+            system_def['external_forces']['force_strength_x'] = 0.0
+            system_def['external_forces']['force_strength_y'] = 0.0
+            system_def['external_forces']['force_strength_z'] = 0.0
         elif problem_name == 'stewart':
             
             scale = 5.0 
 
-            bodies.append( make_body( os.path.join(".", "data", "stewart-base.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-arm1.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-arm2.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-arm3.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-arm4.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-arm5.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-arm6.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-strut1.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-strut2.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-strut3.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-strut4.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-strut5.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-strut6.obj"), 1000, scale) )
-            bodies.append( make_body( os.path.join(".", "data", "stewart-top.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-base.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-arm1.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-arm2.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-arm3.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-arm4.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-arm5.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-arm6.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-strut1.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-strut2.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-strut3.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-strut4.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-strut5.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-strut6.obj"), 1000, scale) )
+            bodies.append( make_body( os.path.join("..", "data", "stewart-top.obj"), 1000, scale) )
 
             numBodiesFixed = 1
 
@@ -267,12 +279,13 @@ class Rigid3DSystem:
                 vb1 = jnp.matmul(jnp.append(vb1,0), qRFull[b1id])
 
             d = pb1 - pb0
-            dist_squared = jnp.sum(d*d)
+            dist_squared = jnp.sum(d*d)  # how close are pb0 and pd1 in world space
             joint_stiffness = 300000.0 
 
-            align = 1.0-jnp.sum(vb0*vb1)
+            align = 1.0-jnp.sum(vb0*vb1)   # how aligned are v0 and v1
             align_stiffness = 500.0
 
+            # bending energy = stretching + bending
             joint_energy += 0.5 * joint_stiffness * dist_squared + 0.5 * align_stiffness * align
 
         ###########
@@ -281,7 +294,7 @@ class Rigid3DSystem:
         ext_force_energy = 0.0
 
         external_forces = system_def['external_forces']
-        forcedBodyId = 23 // 2
+        forcedBodyId = 32//2
 
         if 'force_strength_x' in external_forces:
             ext_force_energy += jnp.sum(qRFull[forcedBodyId,3,0] * external_forces['force_strength_x'])
@@ -307,13 +320,23 @@ class Rigid3DSystem:
 
         rotT = qR[:,0:3,:]
         ide = jnp.stack([jnp.identity(3)]*rotT.shape[0])
-
-        const = rotT @ jnp.swapaxes(rotT,1,2) - ide 
-        rigid_energy = 5000*jnp.sum(const*const)   
+        const = rotT @ jnp.swapaxes(rotT,1,2) - ide
+        rigid_energy = 5000000*jnp.sum(const*const)   # |R^T R -I|
 
         ###########
+        # far from Identitiy energy
+        # Compute the trace of each matrix
 
-        return joint_energy + gravity_energy + ext_force_energy + rigid_energy + contact_energy
+        measure_to_ide = jnp.swapaxes(rotT,1,2) - ide
+        norm_to_ide = - 1.0 * jnp.sum(measure_to_ide * measure_to_ide)  # |R-I|
+
+        traces =(jnp.trace(jnp.swapaxes(rotT, 1, 2), axis1=1, axis2=2))  # Sum of diagonals for each matrix
+        #debug.print("traces: {}", traces)
+        # Compute the rotation angles
+        cos_theta = jnp.clip((traces - 1) / 2, -0.9, 0.9)
+        sin2_angles = - 2.5 * jnp.sum(jnp.arccos(cos_theta))  # sin^(angles)
+
+        return joint_energy + gravity_energy + ext_force_energy + rigid_energy + contact_energy # + norm_to_ide #+ sin2_angles
 
     def kinetic_energy(self, system_def, q, q_dot):
 
@@ -321,7 +344,7 @@ class Rigid3DSystem:
         massR = system_def['mass'].reshape(-1,4,4)
         
         A = jnp.swapaxes(q_dotR,1,2) @ massR @ q_dotR
-        return 0.5*jnp.sum(jnp.trace(A, axis1=1, axis2=2))
+        return 0.5*jnp.sum(jnp.trace(A, axis1=1, axis2=2))    # 0.5 * norm(q_dot^T Mass * q_dot)
 
     # ===========================================
     # === Conditional systems
@@ -357,10 +380,13 @@ class Rigid3DSystem:
         xr = jnp.concatenate((system_def['fixed_pos'],x)).reshape(-1,4,3)
 
         for bid in range(self.n_bodies):
-            v = np.array(jnp.matmul(self.bodiesRen[bid]['W'], xr[bid]))
+            v = np.array(jnp.matmul(self.bodiesRen[bid]['W'], xr[bid]))  # W[bid] (v, 4)
             f = np.array(self.bodiesRen[bid]['f'])
 
+
             ps_body = ps.register_surface_mesh("body" + prefix + str(bid), v, f)
+
+
             if transparency < 1.:
                 ps_body.set_transparency(transparency)
 
