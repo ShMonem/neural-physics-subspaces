@@ -33,3 +33,5 @@ def get_subspace_domain_dict(domain_name):
         raise ValueError("unrecognized subspace domain name")
 
     return subspace_domain_dict
+
+

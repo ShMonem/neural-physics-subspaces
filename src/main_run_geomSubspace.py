@@ -13,17 +13,23 @@ import equinox as eqx
 
 import polyscope as ps
 import polyscope.imgui as psim
-
+from jax import debug
 # import igl
+from layers_geomSubspace import get_latent_domain_dict
 
 # Imports from this project
 import utils
-import config, layers, integrators, subspace
+import config_geomSubspace as config
+import layers_geomSubspace as layers
+import integrators, subspace
 
 SRC_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT_DIR = os.path.join(SRC_DIR, "..")
 
-
+FRAME = 1
+RECORD_FRAME = False
+RECORD_SNAPSHOTS = False
+NUM_SNAPSHOTS = 10000
 def main():
     # Build command line arguments
     parser = argparse.ArgumentParser()
@@ -34,7 +40,8 @@ def main():
 
     # Arguments specific to this program
     parser.add_argument("--integrator", type=str, default="implicit-proximal")
-    parser.add_argument("--subspace_model", type=str, default = "../output/bar/data_free_subspaces/neural_subspace_Cos_rigid3d_bar_normal_dim4_wexp1_final")
+    parser.add_argument("--subspace_model", type=str, default = "../output/bar/nn_solvers/neural_subspace_ReLU_rigid3d_bar_final")
+    parser.add_argument("--subspace_info", type=str, default = "../output/bar/nn_solvers/neural_subspace_ReLU_rigid3d_bar_final_info")
 
     # Parse arguments
     args = parser.parse_args()
@@ -66,24 +73,23 @@ def main():
         # load subspace weights
         with open(args.subspace_model + '.json', 'r') as json_file:
             subspace_model_spec = json.loads(json_file.read())
-        subspace_model = layers.create_model(subspace_model_spec)
+        subspace_model = layers.create_model(subspace_model_spec)[1]
         _, subspace_model_static = eqx.partition(subspace_model, eqx.is_array)
 
-        subspace_model_params = eqx.tree_deserialise_leaves(args.subspace_model + ".eqx",
+        subspace_model_params = eqx.tree_deserialise_leaves(args.subspace_model + "_decoder.eqx",
                                                             subspace_model)
 
         # load other info
-        d = np.load(args.subspace_model + "_info.npy", allow_pickle=True).item()
+        d = np.load(args.subspace_info + ".npy", allow_pickle=True).item()
 
         subspace_dim = d['subspace_dim']
-        subspace_domain_dict = subspace.get_subspace_domain_dict(d['subspace_domain_type'])
+        subspace_domain_dict = layers.get_latent_domain_dict(d['subspace_domain_type'])
         latent_comb_dim = system_def['interesting_states'].shape[0]
         t_schedule_final = d['t_schedule_final']
 
         def apply_subspace(subspace_model_params, x, cond_params):
             subspace_model = eqx.combine(subspace_model_params, subspace_model_static)
-            return subspace_model(jnp.concatenate((x, cond_params), axis=-1),
-                                  t_schedule=t_schedule_final)
+            return subspace_model(jnp.concatenate((x, cond_params), axis=-1))[1]
 
         if args.system_name != d['system']:
             raise ValueError("system name does not match loaded weights")

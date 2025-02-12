@@ -13,7 +13,7 @@ def add_system_args(parser):
     # parser.add_argument("--problem_name", type=str, required=True)
     parser.add_argument("--system_name", type=str, default="rigid3d")   # adjust --
     parser.add_argument("--problem_name", type=str, default="bar")    # adjust --
-    parser.add_argument("--timestep_h", type=float, default=0.05)
+    parser.add_argument("--timestep_h", type=float, default=1)
 
 def add_learning_args(parser):
     parser.add_argument("--MLP_hidden_layers", type=int, default=5)     # adjust --

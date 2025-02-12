@@ -18,8 +18,8 @@ from jax import debug
 import equinox as eqx
 # Imports from this project
 import utils
-import config_vel as config
-import layers_vel as layers
+import config_geomSubspace as config
+import layers_geomSubspace as layers
 import os
 import matplotlib.pyplot as plt
 
@@ -55,6 +55,8 @@ def main():
     # network defaults
     parser.add_argument("--model_type", type=str, default='learnGeometricalAwareSolver')
     parser.add_argument("--activation", type=str, default='ReLU')
+    parser.add_argument("--subspace_dim", type=int, default=2)        # adjust --
+    parser.add_argument("--subspace_domain_type", type=str, default='velo2T')
 
     # Parse arguments
     args = parser.parse_args()
@@ -93,29 +95,28 @@ def main():
         omega_predicted = model(test_pos_velos)
         return jnp.mean(jnp.square(omega_predicted - test_omega))
 
-    def test_autocoder_accuracy(encoder, decoder, test_decode_pos_snaps, test_decode_omega_snaps, test_decode_rot_snaps, test_decode_tranz_snaps):
+    def test_autocoder_accuracy(encoder, decoder, test_decode_pos_snaps, test_decode_omega_snaps, test_decode_T_snaps):
         # forward pass
         omega_predicted, alpha = encoder(test_decode_pos_snaps)
-        omega_reconstructed, rot_predicted , translation_predicted = decoder(alpha)
+        omega_reconstructed, transform_predicted = decoder(alpha)
 
         accuracy = jnp.mean(jnp.square(omega_predicted - test_decode_omega_snaps)) +\
                     jnp.mean(jnp.square(omega_reconstructed - test_decode_omega_snaps)) + \
-                   jnp.mean(jnp.square(rot_predicted - test_decode_rot_snaps)) + \
-                   jnp.mean(jnp.square(translation_predicted - test_decode_tranz_snaps))
+                   jnp.mean(jnp.square(transform_predicted - test_decode_T_snaps))
 
-        return jnp.mean(jnp.square(rot_predicted - test_decode_rot_snaps))
+        return accuracy
     # Define the training step
     @jax.jit
-    def train_step(i_iter, positions_snapshots, omega_snapshots, transformation_snapshots,  opt_state_encoder, opt_state_decoder):
+    def train_step(i_iter, pos_snaps, omega_snaps, transf_snaps, rot_snaps, t_snaps,  opt_state_encoder, opt_state_decoder):
 
         encoder_params = opt.params_fn(opt_state_encoder)
         decoder_params = opt.params_fn(opt_state_decoder)
 
         def loss_fn_encoder(encoder_pars):
-            return encoder_energy(encoder_pars, positions_snapshots, omega_snapshots)
+            return encoder_energy(encoder_pars, pos_snaps, omega_snaps)
 
         def loss_fn_decoder(decoder_pars, alpha_):
-            return decoder_energy(decoder_pars, alpha_, omega_snapshots, transformation_snapshots)
+            return decoder_energy(decoder_pars, alpha_, omega_snaps, transf_snaps, rot_snaps, t_snaps)
 
         # optimize for the parameters
         (encoder_loss, latent), encoder_grads = jax.value_and_grad(loss_fn_encoder, has_aux=True)(encoder_params)
@@ -127,25 +128,21 @@ def main():
 
         return encoder_loss + decoder_loss, opt_state_encoder, opt_state_decoder
 
-    def decoder_energy(decoder_params, alpha, omega_snapshots, transformations_snapshots):
+    def decoder_energy(decoder_params, alpha, omega_snapshots, transf_snaps, rot_snaps, t_snaps):
         """
         Compute the total loss for the encoder and decoder.
         """
         decoder = eqx.combine(decoder_params, model_l2r_static)
 
-        omega_reconstructed, rotation_predicted, translation_predicted = decoder(alpha)
-
-        transformations_predicted = jnp.zeros((rotation_predicted.shape[1], 4, 3))
-        transformations_predicted = transformations_predicted.at[:, :3, :].set(jnp.reshape(rotation_predicted,(3, 3, -1)).transpose((2, 0, 1)))
-        transformations_predicted = transformations_predicted.at[:, 3, :].set(translation_predicted.transpose())
+        omega_r, transf_p, rot_p, t_p= decoder(alpha)
         # Decoder loss: Difference between reconstructed omega and ground truth
-        decoder_loss_omega = jnp.mean(jnp.square(omega_reconstructed - omega_snapshots))
-        decoder_loss_transformation = jnp.mean(jnp.square(jnp.reshape(transformations_predicted, (-1, 12)).transpose() - transformations_snapshots))
+        loss_omega = jnp.mean(jnp.square(omega_r - omega_snapshots))
+        loss_transf = jnp.mean(jnp.square(transf_p - transf_snaps))
 
-        # decoder_loss_rot = jnp.mean(jnp.square(rotation_predicted - rot_snapshots))
-        # decoder_loss_translation = jnp.mean(jnp.square(translation_snapshots - translation_snapshots))
+        loss_rot = jnp.mean(jnp.square(rot_p - rot_snaps))
+        loss_t = jnp.mean(jnp.square(t_p - t_snaps))
 
-        return decoder_loss_omega + decoder_loss_transformation
+        return loss_omega + loss_transf + loss_rot + loss_t
 
     def encoder_energy(encoder_params, positions_snapshots, omega_snapshots):
         """
@@ -221,19 +218,19 @@ def main():
                 test_snap_fullT.append(data['full_transform'])
                 count += 1
 
-        character.linear = jnp.array(snap_posV).reshape(count, -1).T    # (3V , K)
-        character.pos = jnp.array(snap_pos).reshape(count, -1).T    # (3V , K
-        character.rot = jnp.array(snap_rot).reshape(count, -1).T        # (9, K)
-        character.omega = jnp.array(snap_omega).reshape(count, -1).T  # (9, K)
-        character.tranz = jnp.array(snap_tranz).reshape(count, -1).T  # (3, K)
-        character.fullT = jnp.array(snap_fullT).reshape(count, -1).T  # (9, K)
+        character.linear = jnp.array(snap_posV).reshape(count, -1).T    # (Sum 3V_i , K)  (i <= n bodies)
+        character.pos = jnp.array(snap_pos).reshape(count, -1).T    # (Sum 3V_i , K)
+        character.rot = jnp.array(snap_rot).reshape(count, -1).T        # (9n, K)
+        character.omega = jnp.array(snap_omega).reshape(count, -1).T  # (9n, K)
+        character.tranz = jnp.array(snap_tranz).reshape(count, -1).T  # (3n, K)
+        character.fullT = jnp.array(snap_fullT).reshape(count, -1).T  # (12n, K)
 
-        character.linear_test = jnp.array(test_snap_posV).reshape(count, -1).T    # (3V , K)
-        character.pos_test = jnp.array(test_snap_pos).reshape(count, -1).T  # (3V , K)
+        character.linear_test = jnp.array(test_snap_posV).reshape(count, -1).T    # (Sum 3V_i , K)
+        character.pos_test = jnp.array(test_snap_pos).reshape(count, -1).T  # (Sum 3V_i , K)
         character.rot_test = jnp.array(test_snap_rot).reshape(count, -1).T
         character.omega_test = jnp.array(test_snap_omega).reshape(count, -1).T
-        character.tranz_test = jnp.array(test_snap_tranz).reshape(count, -1).T  # (3, K)
-        character.fullT_test = jnp.array(test_snap_fullT).reshape(count, -1).T  # (9, K)
+        character.tranz_test = jnp.array(test_snap_tranz).reshape(count, -1).T  # (3n, K)
+        character.fullT_test = jnp.array(test_snap_fullT).reshape(count, -1).T  # (9n, K)
 
         return character
     sim = read_train_and_test_snapshots(file_patern_p1="snapshot", file_patern_ext="_"+system.problem_name+"_.npz")
@@ -242,16 +239,15 @@ def main():
     nn_dict = {}
     nn_dict['model_type'] = args.model_type
     nn_dict['activation'] = args.activation
-    nn_dict['MLP_hidden_layers'] = args.MLP_hidden_layers
+    nn_dict['MLP_hidden_layers'] = args.MLP_hidden_layers  # 3
     nn_dict['MLP_hidden_layer_width'] = args.MLP_hidden_layer_width
     nn_dict['vel_dim'] = sim.linear.shape[0]  # 3V
     nn_dict['pos_dim'] = sim.pos.shape[0]  # 3V
     nn_dict['rot_dim'] = sim.rot.shape[0]  # 9
     nn_dict['omega_dim'] = sim.omega.shape[0]  # 9
     nn_dict['tranz_dim'] = sim.tranz.shape[0]  # 9
-    nn_dict['latent_dim'] = 2  # TODO: to adjust for each case
-    nn_dict['hidden_dim'] = 40
-    nn_dict['depth'] = 3
+    nn_dict['latent_dim'] = args.subspace_dim  # TODO: to adjust for each case
+
     rngkey, subkey = jax.random.split(rngkey)
     model_pos2latent, model_latent2rot = layers.create_model(nn_dict, subkey)
     # model1 is the NN learning angular velocity from positional velocity, and finds latent space
@@ -269,11 +265,13 @@ def main():
     energy_itr = []
     for i_train_iter in range(args.n_train_iters):
         energy_val, opt_state_encoder, opt_state_decoder = train_step(i_train_iter,
-                                                           sim.linear,
-                                                           sim.omega,
-                                                           sim.fullT,
-                                                           opt_state_encoder, opt_state_decoder
-                                                           )
+                                                            sim.linear,
+                                                            sim.omega,
+                                                            sim.fullT,
+                                                            sim.rot,
+                                                            sim.tranz,
+                                                            opt_state_encoder,
+                                                            opt_state_decoder)
         if i_train_iter % 2 == 0:
             print(f"Epoch {i_train_iter}, Loss: {energy_val:.8f}")
             energy_itr.append(energy_val)
@@ -285,7 +283,7 @@ def main():
             print(f"Saving result to {network_filename_pre}")
             
             encoder_model = eqx.combine(model_p2l_params, model_p2l_static)
-            decoder_model = eqx.combine(model_p2l_params, model_p2l_static)
+            decoder_model = eqx.combine(model_l2r_params, model_l2r_static)
             # model = eqx.combine(model_params, model_static)
             # eqx.tree_serialise_leaves(network_filename_pre + ".eqx", model)
             eqx.tree_serialise_leaves(network_filename_pre + "_encoder.eqx", encoder_model)
@@ -297,6 +295,8 @@ def main():
                     'system': args.system_name,
                     'problem_name': args.problem_name,
                     'activation': args.activation,
+                    'subspace_dim': args.subspace_dim,
+                    'subspace_domain_type': args.subspace_domain_type,
                 })
 
             print(f"  ...done saving to ", network_filename_pre + "_info")
@@ -315,8 +315,7 @@ def main():
     print("Testing NN on different snapshot set", test_autocoder_accuracy(model_pos2latent, model_latent2rot,
                                                                           sim.linear_test,
                                                                           sim.omega_test,
-                                                                          sim.rot_test,
-                                                                          sim.tranz_test))
+                                                                          sim.fullT_test))
 
 
 main()

@@ -134,6 +134,20 @@ class Rigid3DSystem:
             system_def['external_forces']['force_strength_x'] = 0.0
             system_def['external_forces']['force_strength_y'] = 0.0
             system_def['external_forces']['force_strength_z'] = 0.0
+
+        elif problem_name == "one_joint":
+            bodies.append(make_body(os.path.join("..", "data", "klann-red.obj"), 1000, 1.0))
+            bodies.append( make_body( os.path.join("..", "data", "klann-purple.obj"), 1000, 1.0) )
+
+            joint_list.append(make_joint(0, -1, bodies, jnp.array([0, 0.08, 0.044]), jnp.array([0, 0.0, 1.0])))
+            joint_list.append( make_joint( 0,  1, bodies, jnp.array([-0.046622,    0.097594  ,0.044 ]), jnp.array([ 0, 0.0, 1.0 ]) ) )
+
+            system_def["gravity"] = jnp.array([0.0, -0.98, 0.0])
+            system_def['external_forces']['force_strength_minmax'] = (-10, 10)
+            system_def['external_forces']['force_strength_x'] = 0.0
+            system_def['external_forces']['force_strength_y'] = 0.0
+            system_def['external_forces']['force_strength_z'] = 0.0
+
         elif problem_name == 'stewart':
             
             scale = 5.0 
@@ -325,18 +339,18 @@ class Rigid3DSystem:
 
         ###########
         # far from Identitiy energy
-        # Compute the trace of each matrix
+        # # Compute the trace of each matrix
+        #
+        # measure_to_ide = jnp.swapaxes(rotT,1,2) - ide
+        # norm_to_ide = - 1.0 * jnp.sum(measure_to_ide * measure_to_ide)  # |R-I|
+        #
+        # traces =(jnp.trace(jnp.swapaxes(rotT, 1, 2), axis1=1, axis2=2))  # Sum of diagonals for each matrix
+        # #debug.print("traces: {}", traces)
+        # # Compute the rotation angles
+        # cos_theta = jnp.clip((traces - 1) / 2, -0.9, 0.9)
+        # sin2_angles = - 2.5 * jnp.sum(jnp.arccos(cos_theta))  # sin^(angles)
 
-        measure_to_ide = jnp.swapaxes(rotT,1,2) - ide
-        norm_to_ide = - 1.0 * jnp.sum(measure_to_ide * measure_to_ide)  # |R-I|
-
-        traces =(jnp.trace(jnp.swapaxes(rotT, 1, 2), axis1=1, axis2=2))  # Sum of diagonals for each matrix
-        #debug.print("traces: {}", traces)
-        # Compute the rotation angles
-        cos_theta = jnp.clip((traces - 1) / 2, -0.9, 0.9)
-        sin2_angles = - 2.5 * jnp.sum(jnp.arccos(cos_theta))  # sin^(angles)
-
-        return joint_energy + gravity_energy + ext_force_energy + rigid_energy + contact_energy # + norm_to_ide #+ sin2_angles
+        return joint_energy + gravity_energy + ext_force_energy + rigid_energy + contact_energy
 
     def kinetic_energy(self, system_def, q, q_dot):
 

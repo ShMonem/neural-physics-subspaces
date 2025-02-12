@@ -108,29 +108,34 @@ def timestep(system, system_def, int_state, int_opts, subspace_fn=None, subspace
         rot_dot_t = (rot_t - jnp.concatenate((system_def['fixed_pos'], int_state['q_tm1'])).reshape(-1, 4, 3)[:, :3, :]) \
                   / int_opts['timestep_h']
 
-        pos = []
-        velo = []
-        omega = []
-        angular = []
+        pos, velo, omega, angular = None, None, None, None
         for bid in range(system.n_bodies):
             # positional velocity
-            pos.append(np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid])) )  # (v_bid, 3)
-            velo.append((np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))
-                        - np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_tm1[bid]))) / int_opts['timestep_h']) # (v_bid, 3)
-            # Extract angular velocity from skew-symmetric matrix
-            omega_bid = jnp.matmul(rot_dot_t[bid], rot_dot_t[bid])
-            omega.append(omega_bid)
-            angular.append(np.array([
-                omega_bid[2, 1] - omega_bid[1, 2],
-                omega_bid[0, 2] - omega_bid[2, 0],
-                omega_bid[1, 0] - omega_bid[0, 1]]) / 2.0)
+            if bid == 0:
+                pos = np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))
+                velo = (np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))
+                            - np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_tm1[bid]))) / int_opts['timestep_h']
 
-        velo = np.array(velo).reshape(-1, 3)
-        pos = np.array(pos).reshape(-1, 3)
-        omega = np.array(omega).reshape(-1, 9)
+                omega_bid = jnp.matmul(rot_dot_t[bid], rot_dot_t[bid])
+                omega = omega_bid
+                angular = jnp.reshape(np.array([
+                    omega_bid[2, 1] - omega_bid[1, 2],
+                    omega_bid[0, 2] - omega_bid[2, 0],
+                    omega_bid[1, 0] - omega_bid[0, 1]]) / 2.0, (-1, 1))
+            else:
+                pos = jnp.vstack([pos, np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid])) ])  # (v_bid, 3)
+                velo = jnp.vstack([velo, (np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))
+                            - np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_tm1[bid]))) / int_opts['timestep_h']])  # (v_bid, 3)
+                # Extract angular velocity from skew-symmetric matrix
+                omega_bid = jnp.matmul(rot_dot_t[bid], rot_dot_t[bid])
+                omega = jnp.vstack([omega, omega_bid])
+                angular = jnp.vstack([angular, jnp.reshape(np.array([
+                    omega_bid[2, 1] - omega_bid[1, 2],
+                    omega_bid[0, 2] - omega_bid[2, 0],
+                    omega_bid[1, 0] - omega_bid[0, 1]]) / 2.0, (-1, 1))])
 
-        np.savez(file_name+"_"+ system.problem_name +"_" +".npz", omega_mat=omega, rot=rot_t, vel=velo, pos=pos,
-                 tranz=translation, full_transform=T_t ,dt=int_opts['timestep_h'])
+        np.savez(file_name+"_" + system.problem_name + "_" + ".npz", omega_mat=omega, angular=angular,
+                 rot=rot_t, vel=velo, pos=pos, tranz=translation, full_transform=T_t, dt=int_opts['timestep_h'])
 
     # Pass args along, but tuple-ify the dict, so we can hash it
     new_int_state, other_outs = timestep_internal(
