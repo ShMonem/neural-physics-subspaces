@@ -18,8 +18,8 @@ from jax import debug
 
 # Imports from this project
 import utils
-import config_geomSubspace as config
-import layers_geomSubspace as layers
+import autoencoder_config as config
+import autoencoder_layers as layers
 import integrators
 from utils import ensure_dir_exists
 

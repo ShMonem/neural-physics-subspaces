@@ -1,5 +1,5 @@
 import numpy as np
-import config_geomSubspace as config
+import autoencoder_config as config
 import os
 
 SRC_DIR = os.path.dirname(os.path.realpath(__file__))

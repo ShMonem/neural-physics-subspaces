@@ -48,13 +48,13 @@ import torch.utils.data as data
 from torch.utils.data import Dataset, DataLoader
 
 
-import layers_geomSubspace as layers
+import autoencoder_layers as layers
 
 print("Device:", jax.devices()[0])
 
 import argparse
-from main_arrange_snapshots import read_snapshots
-import config_geomSubspace as config
+from arrange_snapshots_4autoencoder import read_snapshots
+import autoencoder_config as config
 from utils import ensure_dir_exists
 
 import warnings
