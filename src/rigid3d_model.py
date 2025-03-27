@@ -397,6 +397,17 @@ class Rigid3DSystem:
             v = np.array(jnp.matmul(self.bodiesRen[bid]['W'], xr[bid]))  # W[bid] (v, 4)
             f = np.array(self.bodiesRen[bid]['f'])
 
+            # min_corner = np.min(v, axis=0)
+            # max_corner = np.max(v, axis=0)
+            # center = (min_corner + max_corner) / 2
+            # size = np.linalg.norm(max_corner - min_corner)*7
+            #
+            # # Put the camera a short distance away in Z
+            # camera_pos = center + np.array([0, 0, 0.5 * size])
+            # print('camera_pos',camera_pos )
+            # print('center', center)
+            # ps.look_at(camera_pos, center)
+
 
             ps_body = ps.register_surface_mesh("body" + prefix + str(bid), v, f)
 

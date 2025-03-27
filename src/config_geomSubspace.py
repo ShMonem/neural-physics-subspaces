@@ -23,7 +23,7 @@ def add_learning_args(parser):
 
 def add_training_args(parser):
     parser.add_argument("--run_name", type=str, default="training")
-    parser.add_argument("--n_train_iters", type=int, default=100000)
+    parser.add_argument("--n_train_iters", type=int, default=1000000)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--report_every", type=int, default=1000)
     parser.add_argument("--lr", type=float, default=1e-4)
