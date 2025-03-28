@@ -130,8 +130,10 @@ def exp_omega(omega_flat_column):
 class transf2Latent_Encoder(eqx.Module):
     rot2omega_layers: typing.List[eqx.nn.Linear]
     rot_dim : int
+    rot_latent_dim: int
     tranz2latent_layers: typing.List[eqx.nn.Linear]
     tranz_dim: int
+    tranz_latent_dim: int
     omega2latent_layers: typing.List[eqx.nn.Linear]
     activation: typing.Callable
 
@@ -143,76 +145,92 @@ class transf2Latent_Encoder(eqx.Module):
         self.omega2latent_layers = []
         self.rot_dim = dict['rot_dim']
         self.tranz_dim = dict['tranz_dim']
-        # building the layers
-        # First:
-        # -- from rotation to angular velocity mat
-        prev_width = dict['rot_dim']  # first layer has full transformation dim
-        keys = jax.random.split(key, dict['MLP_hidden_layers'])  # first round of keys
-        for i_layer in range(dict['MLP_hidden_layers']):
-            is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
-            # last layer would have omega dim, otherwise a user pre-defined 'width'
-            next_width = dict['omega_dim'] if is_last else dict['MLP_hidden_layer_width']
 
-            self.rot2omega_layers.append(eqx.nn.Linear(prev_width, next_width, use_bias=True, key=keys[i_layer]))
-            prev_width = next_width
+        self.rot_latent_dim = dict['rot_latent_dim']
+        self.tranz_latent_dim = dict['tranz_latent_dim']
 
-        # -- from full translation to translation_latent vector
-        key, subkey = jax.random.split(key)
-        prev_width = dict['tranz_dim']  # first layer has full transformation dim
-        keys = jax.random.split(key, dict['MLP_hidden_layers'])  # first round of keys
-        for i_layer in range(dict['MLP_hidden_layers']):
-            is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
-            next_width = dict['tranz_latent_dim'] if is_last else dict['MLP_hidden_layer_width']
+        # building only necessary  layers
+        # First: rotation layers
+        if self.rot_latent_dim > 0:
+            # 1 -- from rotation to angular velocity mat
+            prev_width = self.rot_dim  # first layer has full transformation dim
+            keys = jax.random.split(key, dict['MLP_hidden_layers'])  # first round of keys
+            for i_layer in range(dict['MLP_hidden_layers']):
+                is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
+                # last layer would have omega dim, otherwise a user pre-defined 'width'
+                next_width = dict['omega_dim'] if is_last else dict['MLP_hidden_layer_width']
 
-            self.tranz2latent_layers.append(
-                eqx.nn.Linear(prev_width, next_width, use_bias=True, key=keys[i_layer]))
-            prev_width = next_width
+                self.rot2omega_layers.append(eqx.nn.Linear(prev_width, next_width, use_bias=True, key=keys[i_layer]))
+                prev_width = next_width
 
-        # Second:
-        # -- from omega matrix and translation vector to latent space
-        prev_width = dict['omega_dim']  # first layer has full transformation dim
-        key, subkey = jax.random.split(key)
-        keys2 = jax.random.split(key, dict['MLP_hidden_layers'])  # second round of keys
-        for i_layer in range(dict['MLP_hidden_layers']):
-            is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
-            # last layer would have latent dim, otherwise a user pre-defined 'width'
-            next_width = dict['rot_latent_dim'] if is_last else dict['MLP_hidden_layer_width']
-            self.omega2latent_layers.append(eqx.nn.Linear(prev_width, next_width, use_bias=True, key=keys2[i_layer]))
-            prev_width = next_width
+            # 2 -- from omega matrix and translation vector to latent space
+            prev_width = dict['omega_dim']  # first layer has full transformation dim
+            key, subkey = jax.random.split(key)
+            keys2 = jax.random.split(key, dict['MLP_hidden_layers'])  # second round of keys
+            for i_layer in range(dict['MLP_hidden_layers']):
+                is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
+                # last layer would have latent dim, otherwise a user pre-defined 'width'
+                next_width = dict['rot_latent_dim'] if is_last else dict['MLP_hidden_layer_width']
+                self.omega2latent_layers.append(
+                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=keys2[i_layer]))
+                prev_width = next_width
+        # Second: translation layers
+        if self.tranz_latent_dim > 0:
+            # -- from full translation to translation_latent vector
+            key, subkey = jax.random.split(key)
+            prev_width = self.tranz_dim  # first layer has full transformation dim
+            keys = jax.random.split(key, dict['MLP_hidden_layers'])  # first round of keys
+            for i_layer in range(dict['MLP_hidden_layers']):
+                is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
+                next_width = dict['tranz_latent_dim'] if is_last else dict['MLP_hidden_layer_width']
+
+                self.tranz2latent_layers.append(
+                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=keys[i_layer]))
+                prev_width = next_width
 
     def __call__(self, y, return_details=False):
         omega = None
-        # MLP layes
-        # Learn omega from Rotation slice
-        x = lax.dynamic_slice(y, start_indices=(0,), slice_sizes=(self.rot_dim,))
-        for i_layer in range(len(self.rot2omega_layers)):
-            is_last = (i_layer + 1 == len(self.rot2omega_layers))
-            x = self.rot2omega_layers[i_layer](x)
-            if not is_last:
-                x = self.activation(x)
-        if return_details:
-            omega = x
-        # now find the rot_latent from the learnt omega and z
-        for i_layer in range(len(self.omega2latent_layers)):
-            is_last = (i_layer + 1 == len(self.omega2latent_layers))
-            x = self.omega2latent_layers[i_layer](x)
-            if not is_last:
-                x = self.activation(x)
-        # x is the latent part that reflects rotation
+        x, z = None, None
+        if self.rot_latent_dim > 0:
+            # Learn omega from Rotation slice
+            x = lax.dynamic_slice(y, start_indices=(0,), slice_sizes=(self.rot_dim,))
+            for i_layer in range(len(self.rot2omega_layers)):
+                is_last = (i_layer + 1 == len(self.rot2omega_layers))
+                x = self.rot2omega_layers[i_layer](x)
+                if not is_last:
+                    x = self.activation(x)
+            if return_details:
+                omega = x
+            # now find the rot_latent from the learnt omega and z
+            for i_layer in range(len(self.omega2latent_layers)):
+                is_last = (i_layer + 1 == len(self.omega2latent_layers))
+                x = self.omega2latent_layers[i_layer](x)
+                if not is_last:
+                    x = self.activation(x)
+            # x is the latent part that reflects rotation
 
-        # Learn translation_latent from Translation slice
-        z = lax.dynamic_slice(y, start_indices=(self.rot_dim,), slice_sizes=(self.tranz_dim,))
-        for i_layer in range(len(self.tranz2latent_layers)):
-            is_last = (i_layer + 1 == len(self.tranz2latent_layers))
-            z = self.tranz2latent_layers[i_layer](z)
-            if not is_last:
-                z = self.activation(z)
-        # z is the latent part that reflects translation
-        
+        if self.tranz_latent_dim > 0:
+            # Learn translation_latent from Translation slice
+            z = lax.dynamic_slice(y, start_indices=(self.rot_dim,), slice_sizes=(self.tranz_dim,))
+            for i_layer in range(len(self.tranz2latent_layers)):
+                is_last = (i_layer + 1 == len(self.tranz2latent_layers))
+                z = self.tranz2latent_layers[i_layer](z)
+                if not is_last:
+                    z = self.activation(z)
+            # z is the latent part that reflects translation
+
+        # DOF might be only rotation or only translation
+        if x is not None and z is None:
+            latent = x
+        if x is None and z is not None:
+            latent = z
+        else:  # x and z are not None:
+            latent = jnp.concatenate([x, z], axis=0)
+
         if return_details:
-            return omega, jnp.concatenate([x, z], axis=0)  # omega, latent subspace
+            return omega, latent  # omega, latent subspace
         else:
-            return jnp.concatenate([x, z], axis=0)  # latent subspace
+            return latent  # latent subspace
 
 
 class latent2Transf_Decoder(eqx.Module):
@@ -228,60 +246,65 @@ class latent2Transf_Decoder(eqx.Module):
         self.latent2tranz_layers = []
         self.tranz_latent_dim = dict['tranz_latent_dim']
 
-        prev_width = dict['rot_latent_dim']
-        # first, from latent to omega layers
-        for i_layer in range(dict['MLP_hidden_layers']):
-            is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
-            # last layer would have output dim, otherwise 'width'
-            next_width = dict['omega_dim'] if is_last else dict['MLP_hidden_layer_width']
+        if self.rot_latent_dim > 0:
+            prev_width = dict['rot_latent_dim']
+            # first, from latent to omega layers
+            for i_layer in range(dict['MLP_hidden_layers']):
+                is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
+                # last layer would have output dim, otherwise 'width'
+                next_width = dict['omega_dim'] if is_last else dict['MLP_hidden_layer_width']
 
-            rngkey, subkey = jax.random.split(rngkey)
-            self.latent2omega_layers.append(
-                eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
-            prev_width = next_width
+                rngkey, subkey = jax.random.split(rngkey)
+                self.latent2omega_layers.append(
+                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
+                prev_width = next_width
 
-        # second, latent to translation layers
-        prev_width = dict['tranz_latent_dim']
-        for t_layer in range(dict['MLP_hidden_layers']):
-            is_last = (t_layer + 1 == dict['MLP_hidden_layers'])
-            # last layer would have output dim, otherwise 'width'
-            next_width = dict['tranz_dim'] if is_last else dict['MLP_hidden_layer_width']
+        if self.tranz_latent_dim > 0:
+            # second, latent to translation layers
+            prev_width = dict['tranz_latent_dim']
+            for t_layer in range(dict['MLP_hidden_layers']):
+                is_last = (t_layer + 1 == dict['MLP_hidden_layers'])
+                # last layer would have output dim, otherwise 'width'
+                next_width = dict['tranz_dim'] if is_last else dict['MLP_hidden_layer_width']
 
-            rngkey, subkey = jax.random.split(rngkey)
-            self.latent2tranz_layers.append(
-                eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
-            prev_width = next_width
+                rngkey, subkey = jax.random.split(rngkey)
+                self.latent2tranz_layers.append(
+                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
+                prev_width = next_width
 
     def __call__(self, y, return_details=False):
         omega = None
-        # from latent to omega
-        x = lax.dynamic_slice(y, start_indices=(0,), slice_sizes=(self.rot_latent_dim,))
-        for i_layer in range(len(self.latent2omega_layers)):
-            is_last = (i_layer + 1 == len(self.latent2omega_layers))
-            x = self.latent2omega_layers[i_layer](x)
+        # default values
+        rotation = jnp.array([1, 0, 0, 0, 1, 0, 0, 0, 1])
+        z = jnp.array([ 0, 0, 0])
+        if self.rot_latent_dim > 0:
+            # from latent to omega
+            x = lax.dynamic_slice(y, start_indices=(0,), slice_sizes=(self.rot_latent_dim,))
+            for i_layer in range(len(self.latent2omega_layers)):
+                is_last = (i_layer + 1 == len(self.latent2omega_layers))
+                x = self.latent2omega_layers[i_layer](x)
 
-            if not is_last:
-                x = self.activation(x)
-        # omega = x
+                if not is_last:
+                    x = self.activation(x)
+            # omega = x
+            # one exponential layer to compute rotation from omega
+            rotation = exp_omega(x)
+
+        if self.tranz_latent_dim > 0:
+            # translation layers
+            z = lax.dynamic_slice(y, start_indices=(self.rot_latent_dim,), slice_sizes=(self.tranz_latent_dim,))
+            for i_layer in range(len(self.latent2tranz_layers)):
+                is_last = (i_layer + 1 == len(self.latent2tranz_layers))
+                z = self.latent2tranz_layers[i_layer](z)
+                if not is_last:
+                    z = self.activation(z)
+            # translation = z
+
         if return_details:
-            omega = x
-        # one exponential layer to compute rotation from omega
-        rotations = exp_omega(x)
-
-        # translation layers
-        z = lax.dynamic_slice(y, start_indices=(self.rot_latent_dim,), slice_sizes=(self.tranz_latent_dim,))
-        for i_layer in range(len(self.latent2tranz_layers)):
-            is_last = (i_layer + 1 == len(self.latent2tranz_layers))
-            z = self.latent2tranz_layers[i_layer](z)
-            if not is_last:
-                z = self.activation(z)
-        # translation = z
-
-        if return_details:
-            return rotations, z   # rotation, translation
+            return rotation, z   # rotation, translation
         else:
             # combine between rot and translation into complete stacked linear transformations
-            return jnp.concatenate([rotations, z], axis=0)  # full transformation
+            return jnp.concatenate([rotation, z], axis=0)  # full transformation
 
 class Autoencoder(eqx.Module):
     encoder: transf2Latent_Encoder
@@ -509,6 +532,10 @@ class TrainerModule:
 
 
 def evaluate_autoencoder(args, model, nn_dict, rng, train_loader, val_loader, test_loader, epochs, checkpoint_path, loader_input_index, pretrained=False):
+
+    # assert subspace dim is not zero
+    assert nn_dict['rot_latent_dim'] + nn_dict['tranz_latent_dim'] > 0
+
     # Create a trainer module with specified hyperparameters
     trainer = TrainerModule(model, nn_dict, rng, loader_input_index, checkpoint_path)
 

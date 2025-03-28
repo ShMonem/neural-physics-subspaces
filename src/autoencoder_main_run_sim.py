@@ -42,9 +42,9 @@ def main():
     parser.add_argument("--integrator", type=str, default="implicit-proximal")
     parser.add_argument("--output_dir", type=str, default="../output")
     parser.add_argument("--output_nn_dir", type=str, default="pretrained_models")
-    parser.add_argument("--NNet_name", type=str, default="_ReLU_epochs_500_rot_latent_dim_3_tranz_latent_dim_3")
-    parser.add_argument("--NNet_model", type=str, default = "checkpoint_400")
-    parser.add_argument("--NNet_info", type=str, default = "info_400")
+    parser.add_argument("--NNet_name", type=str, default="_ReLU_rot_latent_dim_9_tranz_latent_dim_3")
+    parser.add_argument("--NNet_model", type=str, default = "checkpoint_100")
+    parser.add_argument("--NNet_info", type=str, default = "info_100")
     parser.add_argument("--framesFolder", type=str, default="frames")
 
     # if to use neural network

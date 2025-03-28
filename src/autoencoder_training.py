@@ -86,7 +86,8 @@ def main():
 
     # Parse arguments
     args = parser.parse_args()
-    train_dataset, nn_dict = read_snapshots(args) # TODO: make loading option possible
+    train_dataset, nn_dict = read_snapshots(args)  # TODO: make loading option possible
+    print("mean vals for dof", np.mean(train_dataset.dof, axis=0))
     print("Training snapshots have been loaded, network dict was constructed:\n", nn_dict)
 
     # split the data into train-validation-test
@@ -138,7 +139,7 @@ def main():
     rng, auto_rng = random.split(rng)
     autoencoder = layers.Autoencoder(nn_dict, auto_rng)
     autoeecoder_params, autoeecoder_static = eqx.partition(autoencoder, eqx.is_array)
-    # print(jax.tree_map(lambda x: x.shape, autoeecoder_params))
+    print(jax.tree_map(lambda x: x.shape, autoeecoder_params))
     # Example full transformations as input
     transfors = next(iter(train_dataloader))[5]  # [5] is the index of transformations in the data set
     transfors = jax.device_put(jnp.array(transfors.numpy()))
@@ -153,12 +154,12 @@ def main():
 
     # Train the autoencoder
     model_train_dict = {}
-    epochs = 500
+    epochs = 100
 
     loader_input_index = 5  # for full transformations
     rot_reduction_loss = []
     network_filename_dir = os.path.join(args.output_dir, args.problem_name, args.output_nn_dir)
-    for rot_latent_dim in range(1, 9 + 1):
+    for rot_latent_dim in [9]:
         args.rot_subspace_dim = rot_latent_dim
         nn_dict['rot_latent_dim'] = args.rot_subspace_dim
         # Build an informative output name

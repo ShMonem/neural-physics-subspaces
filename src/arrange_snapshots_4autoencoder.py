@@ -22,6 +22,7 @@ class characterDataset(Dataset):
         self.rot = None
         self.tranz = None
         self.fullT = None
+        self.dof = None
         self.len = -1
 
 
@@ -32,6 +33,7 @@ class characterDataset(Dataset):
         snap_rot = []
         snap_tranz = []
         snap_fullT = []
+        snap_dof = []
         self.len = numSnaps
         count = 0
         for s in range(1, numSnaps+1):
@@ -44,6 +46,7 @@ class characterDataset(Dataset):
                 snap_rot.append(data['rot'])
                 snap_tranz.append(data['tranz'])
                 snap_fullT.append(data['full_transform'])
+                snap_dof.append(transformation_to_dof(data['full_transform']))   # TODO: this works yet only on one body
 
                 count += 1
 
@@ -56,6 +59,7 @@ class characterDataset(Dataset):
         self.omega = jnp.array(snap_omega).reshape(count, -1)  # (K, 9n)
         self.tranz = jnp.array(snap_tranz).reshape(count, -1)  # (K, 3n)
         self.fullT = jnp.array(snap_fullT).reshape(count, -1)  # (K, 12n)
+        self.dof = jnp.array(snap_dof).reshape(count, -1)  # (K, 6)   # TODO: this works yet only on one body
     def __len__(self):
         return self.len
 
@@ -66,7 +70,8 @@ class characterDataset(Dataset):
         rot = np.array( self.rot[idx], dtype=np.float32)        # 9
         tranz = np.array(self.tranz[idx], dtype=np.float32)    # 3
         fullT = np.array(self.fullT[idx], dtype=np.float32)    # 12
-        return linear, pos, omega, rot, tranz, fullT
+        dof = np.array(self.dof[idx], dtype=np.float32)        # 6
+        return linear, pos, omega, rot, tranz, fullT, dof
 
 def read_snapshots(args, store_npy=False):
 
@@ -122,3 +127,44 @@ def load_snapshots(args, shift, jump):
 
     return character
 
+
+import jax.numpy as jnp
+
+
+def transformation_to_dof(T, retur_values=True, return_dof=False):
+    # TODO: multi-bodies case
+    """
+    Converts a 4x3 homogeneous transformation matrix to 6D pose (yaw, pitch, roll, x, y, z)
+    using ZYX (yaw-pitch-roll) Euler angle convention.
+
+    Args:
+        T: jnp.ndarray of shape (4, 3)
+
+    Returns:
+        array([yaw, pitch, roll, x, y, z])
+    """
+    if T.shape[0] == 1:
+        T = np.squeeze(T, axis=0)
+    assert T.shape == (4, 3), "Input must be a 4x3 transformation matrix"
+
+    # the function returens either the values or the degrees of freedom
+    assert (retur_values or return_dof) and not (retur_values and return_dof)  # TODO: dof part
+
+    # Extract rotation and translation
+    R = T[:3, :]
+    t = T[3, :]
+
+    # Compute pitch
+    pitch = -jnp.arcsin(jnp.clip(R[2, 0], -1.0, 1.0))
+
+    # Handle gimbal lock
+    cos_pitch = jnp.cos(pitch)
+    if jnp.abs(cos_pitch) > 1e-6:
+        roll = jnp.arctan2(R[2, 1], R[2, 2])
+        yaw = jnp.arctan2(R[1, 0], R[0, 0])
+    else:
+        # Gimbal lock: pitch is +/- 90 degrees
+        roll = jnp.arctan2(-R[1, 2], R[1, 1])
+        yaw = 0.0
+
+    return np.array([yaw, pitch, roll, t[0], t[1], t[2]])
