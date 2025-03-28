@@ -95,9 +95,9 @@ def main():
 
     batchSize = 500
     # loaders for each data set
-    train_dataloader = DataLoader(train_set, batch_size=4000, num_workers=4, pin_memory=True, shuffle=True)
-    val_dataloader = DataLoader(val_set, batch_size=1500, num_workers=4, shuffle=True)
-    test_dataloader = DataLoader(test_set, batch_size=3000, num_workers=4, shuffle=True)
+    train_dataloader = DataLoader(train_set, batch_size=batchSize, num_workers=4, pin_memory=True, shuffle=True)
+    val_dataloader = DataLoader(val_set, batch_size=batchSize, num_workers=4, shuffle=True)
+    test_dataloader = DataLoader(test_set, batch_size=batchSize, num_workers=4, shuffle=True)
 
     ## 1. Test encoder implementation
     # Random key for initialization

@@ -42,7 +42,7 @@ def main():
     parser.add_argument("--integrator", type=str, default="implicit-proximal")
     parser.add_argument("--output_dir", type=str, default="../output")
     parser.add_argument("--output_nn_dir", type=str, default="pretrained_models")
-    parser.add_argument("--NNet_name", type=str, default="_ReLU_rot_latent_dim_9_tranz_latent_dim_3")
+    parser.add_argument("--NNet_name", type=str, default="_ReLU_epochs_100_rot_latent_dim_9_tranz_latent_dim_3")
     parser.add_argument("--NNet_model", type=str, default = "checkpoint_100")
     parser.add_argument("--NNet_info", type=str, default = "info_100")
     parser.add_argument("--framesFolder", type=str, default="frames")
@@ -86,7 +86,6 @@ def main():
         autoencoder = layers.Autoencoder(autoencoder_model_dict)
         _, params_static = eqx.partition(autoencoder, eqx.is_array)
         model_params = eqx.tree_deserialise_leaves(args.NNet_model + "_autoencoder.eqx", autoencoder)
-
 
         # load other info
         d = np.load(args.NNet_info + ".npy", allow_pickle=True).item()
