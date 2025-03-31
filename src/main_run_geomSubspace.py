@@ -17,7 +17,6 @@ from jax import debug
 # import igl
 
 # Imports from this project
-import utils
 import config_geomSubspace as config
 import layers_geomSubspace as layers
 import integrators
@@ -42,9 +41,9 @@ def main():
     parser.add_argument("--integrator", type=str, default="implicit-proximal")
     parser.add_argument("--output_dir", type=str, default="../output")
     parser.add_argument("--output_nn_dir", type=str, default="pretrained_models")
-    parser.add_argument("--NNet_name", type=str, default="_ReLU_epochs_500_rot_latent_dim_3_tranz_latent_dim_3")
-    parser.add_argument("--NNet_model", type=str, default = "checkpoint_400")
-    parser.add_argument("--NNet_info", type=str, default = "info_400")
+    parser.add_argument("--subspace_name", type=str, default="_ReLU_epochs_100_rot_latent_dim_12_tranz_latent_dim_3")
+    parser.add_argument("--subspace_model", type=str, default="checkpoint_100")
+    parser.add_argument("--subspace_info", type=str, default="info_100")
     parser.add_argument("--framesFolder", type=str, default="frames")
 
     # if to use neural network
@@ -52,8 +51,8 @@ def main():
 
     # build correct paths arguments
     args = parser.parse_args()
-    args.NNet_model = os.path.join(args.output_dir, args.problem_name, args.output_nn_dir, args.NNet_name, args.NNet_model)
-    args.NNet_info = os.path.join(args.output_dir, args.problem_name, args.output_nn_dir, args.NNet_name, args.NNet_info)
+    args.subspace_model = os.path.join(args.output_dir, args.problem_name, args.output_nn_dir, args.subspace_name, args.subspace_model)
+    args.subspace_info = os.path.join(args.output_dir, args.problem_name, args.output_nn_dir, args.subspace_name, args.subspace_info)
 
     # Process args
     config.process_jax_args(args)
@@ -69,46 +68,49 @@ def main():
     ps.set_ground_plane_mode('none')
 
     #########################################################################
-    ### Load NNet map (if given)
+    ### Load subspace map (if given)
     #########################################################################
 
-    # If we're running on a use_NNet system, load it
+    # If we're running on a use_subspace system, load it
     model_params = None
-    NNet_dim = -1
-    NNet_domain_dict = None
+    subspace_dim = -1
+    subspace_domain_dict = None
     if args.use_nn_subsapce:
-        print(f"Loading NNet from {args.NNet_model}")
+        print(f"Loading subspace from {args.subspace_model}")
 
         # load autoencoder dictionary .json
-        with open(args.NNet_model + '.json', 'r') as json_file:
+        with open(args.subspace_model + '.json', 'r') as json_file:
             autoencoder_model_dict = json.loads(json_file.read())
 
         autoencoder = layers.Autoencoder(autoencoder_model_dict)
         _, params_static = eqx.partition(autoencoder, eqx.is_array)
-        model_params = eqx.tree_deserialise_leaves(args.NNet_model + "_autoencoder.eqx", autoencoder)
-
+        model_params = eqx.tree_deserialise_leaves(args.subspace_model + "_autoencoder.eqx", autoencoder)
 
         # load other info
-        d = np.load(args.NNet_info + ".npy", allow_pickle=True).item()
+        d = np.load(args.subspace_info + ".npy", allow_pickle=True).item()
 
-        NNet_dim = d['subspace_dim']
-        NNet_domain_dict = layers.get_latent_domain_dict(d['subspace_domain_type'])
+        subspace_dim = d['subspace_dim']
+        subspace_domain_dict = layers.get_latent_domain_dict(d['subspace_domain_type'])
         latent_comb_dim = system_def['interesting_states'].shape[0]
         t_schedule_final = d['t_schedule_final']
 
-        def apply_NNet(auto_model_params, x, cond_params):
+        def apply_subspace(auto_model_params, x, cond_params):
             autoencoder_model = eqx.combine(auto_model_params, params_static)
             return autoencoder_model.decoder(jnp.concatenate((x, cond_params), axis=-1))
+
+        def get_full_from_subspace(auto_model_params, z):
+            autoencoder_model = eqx.combine(auto_model_params, params_static)
+            return autoencoder_model.encoder(z)
 
         if args.system_name != d['system']:
             raise ValueError("system name does not match loaded weights")
         if args.problem_name != d['problem_name']:
             raise ValueError("problem name does not match loaded weights")
-    use_NNet = model_params is not None
+    use_subspace = model_params is not None
 
     print("System dimension: " + str(system_def['init_pos'].shape[0]))
-    if use_NNet:
-        print("NNet dimension: " + str(NNet_dim))
+    if use_subspace:
+        print("Subspace dimension: " + str(subspace_dim))
 
     #########################################################################
     ### Set up state & UI params
@@ -122,20 +124,21 @@ def main():
     ## State of the system
 
     # UI state
-    run_sim = False
+    run_sim = True
     eval_energy_every = True
     update_viz_every = True
 
     # Set up state parameters
 
-    if use_NNet:
-        base_latent = jnp.zeros(NNet_dim) + NNet_domain_dict['initial_val']
+    if use_subspace:
+        base_latent = jnp.zeros(subspace_dim) + subspace_domain_dict['initial_val']
     else:
         base_latent = None
 
     def reset_state():
-        if use_NNet:
-            int_state['q_t'] = base_latent
+        if use_subspace:
+            # int_state['q_t'] = base_latent
+            int_state['q_t'] = get_full_from_subspace(model_params, system_def['init_pos'])
         else:
             int_state['q_t'] = system_def['init_pos']
         int_state['q_tm1'] = int_state['q_t']
@@ -144,21 +147,21 @@ def main():
         system.visualize(system_def, state_to_system(system_def, int_state['q_t']))
 
     def state_to_system(system_def, state):
-        if use_NNet:
-            return apply_NNet(model_params, state, system_def['cond_param'])
+        if use_subspace:
+            return apply_subspace(model_params, state, system_def['cond_param'])
         else:
             # in the non-latent state, it's the identity
             return state
 
-    if use_NNet:
+    if use_subspace:
         baseState = state_to_system(system_def, base_latent)
     else:
         baseState = system_def['init_pos']
 
-    if use_NNet:
-        NNet_fn = state_to_system
+    if use_subspace:
+        subspace_fn = state_to_system
     else:
-        NNet_fn = None
+        subspace_fn = None
 
     ps.set_automatically_compute_scene_extents(False)
     reset_state()  # also creates initial viz
@@ -181,9 +184,9 @@ def main():
         # Define the GUI
 
         # some latent sliders
-        if use_NNet:
+        if use_subspace:
 
-            psim.TextUnformatted(f"NNet domain type: {NNet_domain_dict['domain_name']}")
+            psim.TextUnformatted(f"subspace domain type: {subspace_domain_dict['domain_name']}")
 
             if psim.TreeNode("explore current latent"):
 
@@ -191,9 +194,9 @@ def main():
 
                 any_changed = False
                 tmp_state_q = int_state['q_t'].copy()
-                low = NNet_domain_dict['viz_entry_bound_low']
-                high = NNet_domain_dict['viz_entry_bound_high']
-                for i in range(NNet_dim):
+                low = subspace_domain_dict['viz_entry_bound_low']
+                high = subspace_domain_dict['viz_entry_bound_high']
+                for i in range(subspace_dim):
                     s = f"latent_{i}"
                     val = tmp_state_q[i]
                     changed, val = psim.SliderFloat(s, val, low, high)
@@ -203,7 +206,7 @@ def main():
 
                 if any_changed:
                     integrators.update_state(int_opts, int_state, tmp_state_q, with_velocity=True)
-                    integrators.apply_domain_projection(int_state, NNet_domain_dict)
+                    integrators.apply_domain_projection(int_state, subspace_domain_dict)
                     system.visualize(system_def, state_to_system(system_def, int_state['q_t']))
 
                 psim.TreePop()
@@ -218,9 +221,9 @@ def main():
             system.visualize(system_def, state_to_system(system_def, int_state['q_t']))
 
             if run_sim and RECORD_FRAME:
-                if use_NNet:
+                if use_subspace:
                     output_dir = os.path.join(args.output_dir, system.problem_name, args.output_nn_dir,
-                                          args.NNet_name, args.framesFolder)
+                                          args.subspace_name, args.framesFolder)
                 else:
                     output_dir = os.path.join(args.output_dir, system.problem_name, args.framesFolder)
                 if FRAME ==1:
@@ -260,8 +263,8 @@ def main():
                                              system_def,
                                              int_state,
                                              int_opts,
-                                             subspace_fn=NNet_fn,
-                                             subspace_domain_dict=NNet_domain_dict,
+                                             subspace_fn=subspace_fn,
+                                             subspace_domain_dict=subspace_domain_dict,
                                              collect_velo_snapshots=False)
 
     ps.set_user_callback(main_loop)

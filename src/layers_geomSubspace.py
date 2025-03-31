@@ -1,11 +1,10 @@
 
 import os
-import jax
 import jax.numpy as jnp
 import equinox as eqx
 import numpy as np
 from jax.scipy.linalg import expm
-from scipy.linalg import logm
+# from scipy.linalg import logm
 import typing
 import jax.lax as lax
 from jax import random, vmap
@@ -14,10 +13,10 @@ from jax import random, vmap
 from jax.example_libraries import optimizers
 import jax
 from tqdm import tqdm
-from typing import Any
-import pickle
+# from typing import Any
+# import pickle
 # from torch.utils.tensorboard import SummaryWriter
-from flax.training import train_state, checkpoints
+# from flax.training import train_state, checkpoints
 from utils import ensure_dir_exists
 import json
 import matplotlib.pyplot as plt
@@ -118,6 +117,7 @@ class PredefinedFunctionLayer(eqx.Module):
     def __call__(self, x):
         return self.fn(x)
 
+
 def exp_omega(omega_flat_column):
     omega_matrix = omega_flat_column.reshape(3, 3)
 
@@ -181,7 +181,6 @@ class transf2Latent_Encoder(eqx.Module):
             prev_width = next_width
 
     def __call__(self, y, return_details=False):
-        omega = None
         # MLP layes
         # Learn omega from Rotation slice
         x = lax.dynamic_slice(y, start_indices=(0,), slice_sizes=(self.rot_dim,))
@@ -253,7 +252,6 @@ class latent2Transf_Decoder(eqx.Module):
             prev_width = next_width
 
     def __call__(self, y, return_details=False):
-        omega = None
         # from latent to omega
         x = lax.dynamic_slice(y, start_indices=(0,), slice_sizes=(self.rot_latent_dim,))
         for i_layer in range(len(self.latent2omega_layers)):
@@ -263,8 +261,6 @@ class latent2Transf_Decoder(eqx.Module):
             if not is_last:
                 x = self.activation(x)
         # omega = x
-        if return_details:
-            omega = x
         # one exponential layer to compute rotation from omega
         rotations = exp_omega(x)
 
@@ -282,6 +278,7 @@ class latent2Transf_Decoder(eqx.Module):
         else:
             # combine between rot and translation into complete stacked linear transformations
             return jnp.concatenate([rotations, z], axis=0)  # full transformation
+
 
 class Autoencoder(eqx.Module):
     encoder: transf2Latent_Encoder
@@ -375,7 +372,6 @@ class TrainerModule:
         batched_model = vmap(model, in_axes=(0, None))
         omega_pred, rot_pred, tranz_pred = batched_model(data, True)
         return jnp.mean((omega_pred - omega) ** 2) + jnp.mean((rot_pred - rot) ** 2) + jnp.mean((tranz_pred - tranz) ** 2)
-
 
     @eqx.filter_jit()
     def train_step(self, opt_state, transfrm, omega=None, rot=None, tranz=None, datailed_loss=False):
@@ -512,22 +508,22 @@ def evaluate_autoencoder(args, model, nn_dict, rng, train_loader, val_loader, te
     # Create a trainer module with specified hyperparameters
     trainer = TrainerModule(model, nn_dict, rng, loader_input_index, checkpoint_path)
 
-    if not pretrained:
-        trainer.train(train_loader, val_loader, args, nn_dict, epochs)
+    # if not pretrained:
+    trainer.train(train_loader, val_loader, args, nn_dict, epochs)
 
-        # show loss behaviour during training
-        plt.plot(trainer.training_epoch, trainer.training_energy_tracker, 'go--', label='energy vals')
-        plt.xlabel('training iter')
-        plt.ylabel('Energy')
-        plt.yscale('log')
+    # show loss behaviour during training
+    plt.plot(trainer.training_epoch, trainer.training_energy_tracker, 'go--', label='energy vals')
+    plt.xlabel('training iter')
+    plt.ylabel('Energy')
+    plt.yscale('log')
 
-        plt.savefig(os.path.join(trainer.log_dir, "loss_while_training.png"))
-        plt.close()
+    plt.savefig(os.path.join(trainer.log_dir, "loss_while_training.png"))
+    plt.close()
 
-        model_params, model_static = eqx.partition(trainer.model, eqx.is_array)
+    # model_params, model_static = eqx.partition(trainer.model, eqx.is_array)
 
-    else:
-        model_params, model_static = trainer.load_model(epochs)
+    # else:
+    model_params, model_static = trainer.load_model(epochs)
     optimized_autoencoder = eqx.combine(model_params, model_static)
 
     test_loss = trainer.evaluate(optimized_autoencoder, test_loader)

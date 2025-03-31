@@ -90,13 +90,18 @@ def main():
     print("Training snapshots have been loaded, network dict was constructed:\n", nn_dict)
 
     # split the data into train-validation-test
+    train_batch = 5000
+    val_batch = 1999
+    test_batch = 3000
+    batchSize = 500
+
     train_set, val_set, test_set = data.random_split(train_dataset, [5000, 1999, 3000], generator=torch.Generator().manual_seed(0))
 
-    batchSize = 500
+
     # loaders for each data set
-    train_dataloader = DataLoader(train_set, batch_size=4000, num_workers=4, pin_memory=True, shuffle=True)
-    val_dataloader = DataLoader(val_set, batch_size=1500, num_workers=4, shuffle=True)
-    test_dataloader = DataLoader(test_set, batch_size=3000, num_workers=4, shuffle=True)
+    train_dataloader = DataLoader(train_set, batch_size=batchSize, num_workers=4, pin_memory=True, shuffle=True)
+    val_dataloader = DataLoader(val_set, batch_size=batchSize, num_workers=4, shuffle=True)
+    test_dataloader = DataLoader(test_set, batch_size=batchSize, num_workers=4, shuffle=True)
 
     ## 1. Test encoder implementation
     # Random key for initialization
@@ -153,38 +158,37 @@ def main():
 
     # Train the autoencoder
     model_train_dict = {}
-    epochs = 500
+    epochs = 100
 
     loader_input_index = 5  # for full transformations
     rot_reduction_loss = []
     network_filename_dir = os.path.join(args.output_dir, args.problem_name, args.output_nn_dir)
-    for rot_latent_dim in range(1, 9 + 1):
-        args.rot_subspace_dim = rot_latent_dim
-        nn_dict['rot_latent_dim'] = args.rot_subspace_dim
-        # Build an informative output name
-        network_filename_base = f"{args.output_prefix}_{args.activation}_epochs_{epochs}_rot_latent_dim_{args.rot_subspace_dim}_tranz_latent_dim_{args.tranz_subspace_dim}"
-        network_filename_pre = os.path.join(network_filename_dir, network_filename_base)
 
-        ensure_dir_exists(network_filename_pre)
-        print(f"Saving result to {network_filename_pre}")
+    # Build an informative output name
+    network_filename_base = f"{args.output_prefix}_{args.activation}_epochs_{epochs}" \
+                            f"_rot_latent_dim_{args.rot_subspace_dim}_tranz_latent_dim_{args.tranz_subspace_dim}"
+    network_filename_pre = os.path.join(network_filename_dir, network_filename_base)
 
-        _ , test_loss = layers.evaluate_autoencoder(args, autoencoder, nn_dict, rng,
-                                                    train_dataloader, val_dataloader, test_dataloader,
-                                                    epochs, network_filename_pre, int(loader_input_index),
-                                                    pretrained=False)
+    ensure_dir_exists(network_filename_pre)
+    print(f"Saving result to {network_filename_pre}")
 
-        rot_reduction_loss.append(test_loss)
+    _ , test_loss = layers.evaluate_autoencoder(args, autoencoder, nn_dict, rng,
+                                                train_dataloader, val_dataloader, test_dataloader,
+                                                epochs, network_filename_pre, int(loader_input_index),
+                                                pretrained=False)
 
-    plt.figure(figsize=(6, 4))
-    plt.plot(range(1, 9 + 1), rot_reduction_loss,
-             '--', color="#000", marker="*", markeredgecolor="#000", markerfacecolor="y", markersize=16)
-    plt.title("Reconstruction error over rot latent dimensionality", fontsize=14)
-    plt.minorticks_off()
-    plt.xlabel('rot latent dim')
-    plt.ylabel('Energy')
-    plt.yscale('log')
-    plt.savefig(os.path.join(network_filename_dir, "loss_while_training_tranz_latent_3_diff_rot_latent_dim.png"))
-    plt.show()
+    rot_reduction_loss.append(test_loss)
+
+    # plt.figure(figsize=(6, 4))
+    # plt.plot(range(1, 9 + 1), rot_reduction_loss,
+    #          '--', color="#000", marker="*", markeredgecolor="#000", markerfacecolor="y", markersize=16)
+    # plt.title("Reconstruction error over rot latent dimensionality", fontsize=14)
+    # plt.minorticks_off()
+    # plt.xlabel('rot latent dim')
+    # plt.ylabel('Energy')
+    # plt.yscale('log')
+    # plt.savefig(os.path.join(network_filename_dir, "loss_while_training_tranz_latent_3_diff_rot_latent_dim.png"))
+    # plt.show()
 
 
 if __name__ == '__main__':
