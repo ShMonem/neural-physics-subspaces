@@ -26,9 +26,9 @@ SRC_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT_DIR = os.path.join(SRC_DIR, "..")
 
 FRAME = 1
-RECORD_FRAME = False
+RECORD_FRAME = True
 RECORD_SNAPSHOTS = False
-NUM_SNAPSHOTS = 1300
+NUM_SNAPSHOTS = 20000
 def main():
     # Build command line arguments
     parser = argparse.ArgumentParser()
@@ -41,13 +41,14 @@ def main():
     parser.add_argument("--integrator", type=str, default="implicit-proximal")
     parser.add_argument("--output_dir", type=str, default="../output")
     parser.add_argument("--output_nn_dir", type=str, default="pretrained_models")
-    parser.add_argument("--subspace_name", type=str, default="_ReLU_epochs_100_rot_latent_dim_12_tranz_latent_dim_3")
+    parser.add_argument("--subspace_name", type=str, default="_ReLU_epochs_100_rot_latent_dim_9_tranz_latent_dim_3")
     parser.add_argument("--subspace_model", type=str, default="checkpoint_100")
     parser.add_argument("--subspace_info", type=str, default="info_100")
     parser.add_argument("--framesFolder", type=str, default="frames")
+    parser.add_argument("--snapsFolder", type=str, default="snapshots")
 
     # if to use neural network
-    parser.add_argument("--use_nn_subsapce", type=str, default=True)
+    parser.add_argument("--use_nn_subsapce", type=str, default=False)
 
     # build correct paths arguments
     args = parser.parse_args()
@@ -233,7 +234,7 @@ def main():
                     print(filename)
 
                     ps.screenshot(filename, transparent_bg=False)
-                    FRAME += 1
+            FRAME += 1
 
         # print energy
         if eval_energy_every:
@@ -258,6 +259,7 @@ def main():
         _, run_sim = psim.Checkbox("run simulation", run_sim)
         psim.SameLine()
         if run_sim or psim.Button("single step"):
+
             # all-important timestep happens here
             int_state = integrators.timestep(system,
                                              system_def,
@@ -265,7 +267,8 @@ def main():
                                              int_opts,
                                              subspace_fn=subspace_fn,
                                              subspace_domain_dict=subspace_domain_dict,
-                                             collect_velo_snapshots=False)
+                                             collect_velo_snapshots=RECORD_SNAPSHOTS,
+                                             file_name=os.path.join(args.output_dir, system.problem_name, args.snapsFolder, f"snap_{FRAME-1:05d}"))
 
     ps.set_user_callback(main_loop)
     ps.show()

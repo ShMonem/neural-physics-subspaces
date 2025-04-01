@@ -25,7 +25,7 @@ class characterDataset(Dataset):
         self.len = -1
 
 
-    def dataFill(self, args, numSnaps, file_patern_p1="snapshot", file_patern_ext="_.npz"):
+    def dataFill(self, args, numSnaps, file_patern_p1="snap_", file_patern_ext=".npz"):
         snap_posV = []
         snap_pos = []
         snap_omega = []
@@ -37,7 +37,7 @@ class characterDataset(Dataset):
         for s in range(1, numSnaps+1):
 
                 data = np.load(os.path.join(args.output_dir, args.problem_name, args.snapshots_input_dir,
-                                            file_patern_p1 + f"{s:05d}" + "_" + args.problem_name + file_patern_ext))
+                                            file_patern_p1 + f"{s:05d}" + file_patern_ext))
                 snap_posV.append(data['vel'])
                 snap_pos.append(data['pos'])
                 snap_omega.append(data['omega_mat'])

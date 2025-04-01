@@ -47,7 +47,6 @@ import torch.utils.data as data
 # from torchvision.datasets import CIFAR10
 from torch.utils.data import Dataset, DataLoader
 
-
 import layers_geomSubspace as layers
 
 print("Device:", jax.devices()[0])
@@ -82,12 +81,16 @@ def main():
     parser.add_argument("--activation", type=str, default='ReLU')
     parser.add_argument("--rot_subspace_dim", type=int, default=9)
     parser.add_argument("--tranz_subspace_dim", type=int, default=3)
-    parser.add_argument("--numSnapshots", type=int, default=9999)
+    parser.add_argument("--numSnapshots", type=int, default=22222)
 
     # Parse arguments
     args = parser.parse_args()
-    train_dataset, nn_dict = read_snapshots(args) # TODO: make loading option possible
+    dataset, nn_dict = read_snapshots(args) # TODO: make loading option possible
     print("Training snapshots have been loaded, network dict was constructed:\n", nn_dict)
+
+    # Build the system object
+    system, system_def = config.construct_system_from_name(args.system_name, args.problem_name)
+
 
     # split the data into train-validation-test
     train_batch = 5000
@@ -95,67 +98,69 @@ def main():
     test_batch = 3000
     batchSize = 500
 
-    train_set, val_set, test_set = data.random_split(train_dataset, [5000, 1999, 3000], generator=torch.Generator().manual_seed(0))
+    train_set, val_set, test_set = data.random_split(dataset, [11111, 5555, 5556], generator=torch.Generator().manual_seed(0))
 
 
     # loaders for each data set
     train_dataloader = DataLoader(train_set, batch_size=batchSize, num_workers=4, pin_memory=True, shuffle=True)
-    val_dataloader = DataLoader(val_set, batch_size=batchSize, num_workers=4, shuffle=True)
+    val_dataloader = DataLoader(val_set, batch_size=batchSize, num_workers=4, shuffle=False)
     test_dataloader = DataLoader(test_set, batch_size=batchSize, num_workers=4, shuffle=True)
 
     ## 1. Test encoder implementation
     # Random key for initialization
-    rng = random.PRNGKey(0)
-    # Example full transformations as input
-    transfors = next(iter(train_dataloader))[5]  # [5] is the index of transformations in the data set
-    transfors = jax.device_put(jnp.array(transfors.numpy()))
-    encoder = layers.transf2Latent_Encoder(nn_dict, rng)
-    # model1 is the NN learning angular velocity from positional velocity, and finds latent space
-    encoder_params, encoder_static = eqx.partition(encoder, eqx.is_array)
-    # print(jax.tree_map(lambda x: x.shape, encoder_params))
-
-    # Test decoder on one image and on a batch
-    out = encoder(transfors[0])
-    print(transfors[0].shape)
-    print(out.shape)
-    batched_encoder = vmap(encoder, in_axes=0)
-    out2 = batched_encoder(transfors)
-    print(transfors.shape)
-    print(out2.shape)
+    # rng = random.PRNGKey(0)
+    # # Example full transformations as input
+    # transfors = next(iter(train_dataloader))[5]  # [5] is the index of transformations in the data set
+    # transfors = jax.device_put(jnp.array(transfors.numpy()))
+    # encoder = layers.transf2Latent_Encoder(nn_dict, rng)
+    # # model1 is the NN learning angular velocity from positional velocity, and finds latent space
+    # encoder_params, encoder_static = eqx.partition(encoder, eqx.is_array)
+    # # print(jax.tree_map(lambda x: x.shape, encoder_params))
+    #
+    # # Test decoder on one image and on a batch
+    # out = encoder(transfors[0])
+    # print(transfors[0].shape)
+    # print(out.shape)
+    # batched_encoder = vmap(encoder, in_axes=0)
+    # out2 = batched_encoder(transfors)
+    # print(transfors.shape)
+    # print(out2.shape)
 
     ## 2, Test decoder implementation
     # Example latents as input
-    rng, lat_rng = random.split(rng)
-    latents = random.normal(lat_rng, (500, nn_dict['rot_latent_dim']+nn_dict['tranz_latent_dim']))
-    decoder = layers.latent2Transf_Decoder(nn_dict, rng)
-    # model1 is the NN learning angular velocity from positional velocity, and finds latent space
-    decoder_params, decoder_static = eqx.partition(decoder, eqx.is_array)
-    # print(jax.tree_map(lambda x: x.shape, decoder_params))
-    # Test decoder on one image and on a batch
-    out = decoder(latents[0])
-    print(latents[0].shape)
-    print(out.shape)
-    batched_decoder = vmap(decoder, in_axes=0)
-    out2 = batched_decoder(latents)
-    print(latents.shape)
-    print(out2.shape)
+    # rng, lat_rng = random.split(rng)
+    # latents = random.normal(lat_rng, (500, nn_dict['rot_latent_dim']+nn_dict['tranz_latent_dim']))
+    # decoder = layers.latent2Transf_Decoder(nn_dict, rng)
+    # # model1 is the NN learning angular velocity from positional velocity, and finds latent space
+    # decoder_params, decoder_static = eqx.partition(decoder, eqx.is_array)
+    # # print(jax.tree_map(lambda x: x.shape, decoder_params))
+    # # Test decoder on one image and on a batch
+    # out = decoder(latents[0])
+    # print(latents[0].shape)
+    # print(out.shape)
+    # batched_decoder = vmap(decoder, in_axes=0)
+    # out2 = batched_decoder(latents)
+    # print(latents.shape)
+    # print(out2.shape)
+    #
+    # rng, auto_rng = random.split(rng)
+    # autoencoder = layers.Autoencoder(nn_dict, auto_rng)
+    # autoeecoder_params, autoeecoder_static = eqx.partition(autoencoder, eqx.is_array)
+    # # print(jax.tree_map(lambda x: x.shape, autoeecoder_params))
+    # # Example full transformations as input
+    # transfors = next(iter(train_dataloader))[5]  # [5] is the index of transformations in the data set
+    # transfors = jax.device_put(jnp.array(transfors.numpy()))
+    # out = autoencoder(transfors[0])
+    # print(transfors[0].shape)
+    # print(out.shape)
+    #
+    # batched_autoencoder = vmap(autoencoder, in_axes=0)
+    # out2 = batched_autoencoder(transfors)
+    # print(transfors.shape)
+    # print(out2.shape)
 
-    rng, auto_rng = random.split(rng)
-    autoencoder = layers.Autoencoder(nn_dict, auto_rng)
-    autoeecoder_params, autoeecoder_static = eqx.partition(autoencoder, eqx.is_array)
-    # print(jax.tree_map(lambda x: x.shape, autoeecoder_params))
-    # Example full transformations as input
-    transfors = next(iter(train_dataloader))[5]  # [5] is the index of transformations in the data set
-    transfors = jax.device_put(jnp.array(transfors.numpy()))
-    out = autoencoder(transfors[0])
-    print(transfors[0].shape)
-    print(out.shape)
-
-    batched_autoencoder = vmap(autoencoder, in_axes=0)
-    out2 = batched_autoencoder(transfors)
-    print(transfors.shape)
-    print(out2.shape)
-
+    # Random key for initialization
+    rng = random.PRNGKey(0)
     # Train the autoencoder
     model_train_dict = {}
     epochs = 100
@@ -172,7 +177,7 @@ def main():
     ensure_dir_exists(network_filename_pre)
     print(f"Saving result to {network_filename_pre}")
 
-    _ , test_loss = layers.evaluate_autoencoder(args, autoencoder, nn_dict, rng,
+    test_loss = layers.evaluate_autoencoder(system, system_def, args, nn_dict, rng,
                                                 train_dataloader, val_dataloader, test_dataloader,
                                                 epochs, network_filename_pre, int(loader_input_index),
                                                 pretrained=False)

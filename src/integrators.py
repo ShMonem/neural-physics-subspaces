@@ -97,7 +97,7 @@ def timestep_internal(system,
 
 
 def timestep(system, system_def, int_state, int_opts, subspace_fn=None, subspace_domain_dict=None,
-             collect_velo_snapshots=False, file_name="", frame=1):
+             collect_velo_snapshots=False, file_name=""):
     if collect_velo_snapshots:
         # linear transformations (4, 3)
         T_t = jnp.concatenate((system_def['fixed_pos'], int_state['q_t'])).reshape(-1, 4, 3)
@@ -134,7 +134,7 @@ def timestep(system, system_def, int_state, int_opts, subspace_fn=None, subspace
                     omega_bid[0, 2] - omega_bid[2, 0],
                     omega_bid[1, 0] - omega_bid[0, 1]]) / 2.0, (-1, 1))])
 
-        np.savez(file_name+"_" + system.problem_name + "_" + ".npz", omega_mat=omega, angular=angular,
+        np.savez(file_name + ".npz", omega_mat=omega, angular=angular,
                  rot=rot_t, vel=velo, pos=pos, tranz=translation, full_transform=T_t, dt=int_opts['timestep_h'])
 
     # Pass args along, but tuple-ify the dict, so we can hash it
