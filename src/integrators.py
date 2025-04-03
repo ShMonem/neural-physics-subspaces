@@ -122,7 +122,7 @@ def timestep(system, system_def, int_state, int_opts, subspace_fn=None, subspace
                     omega_bid[2, 1] - omega_bid[1, 2],
                     omega_bid[0, 2] - omega_bid[2, 0],
                     omega_bid[1, 0] - omega_bid[0, 1]]) / 2.0, (-1, 1))
-            else:
+            else: # TODO!
                 pos = jnp.vstack([pos, np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid])) ])  # (v_bid, 3)
                 velo = jnp.vstack([velo, (np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))
                             - np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_tm1[bid]))) / int_opts['timestep_h']])  # (v_bid, 3)

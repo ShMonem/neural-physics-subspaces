@@ -80,18 +80,19 @@ def main():
     parser.add_argument("--model_type", type=str, default='learnGeometricalAwareSolver')
     parser.add_argument("--activation", type=str, default='ReLU')
     parser.add_argument("--rot_subspace_dim", type=int, default=9)
-    parser.add_argument("--tranz_subspace_dim", type=int, default=3)
+    parser.add_argument("--tranz_subspace_dim", type=int, default=0)
     parser.add_argument("--numSnapshots", type=int, default=22222)
 
     # Parse arguments
     args = parser.parse_args()
     dataset, nn_dict = read_snapshots(args) # TODO: make loading option possible
+    print("mean vals for dof", np.mean(np.abs(dataset.dof), axis=0))
     print("Training snapshots have been loaded, network dict was constructed:\n", nn_dict)
-
     # Build the system object
     system, system_def = config.construct_system_from_name(args.system_name, args.problem_name)
 
-
+    # Force jax to initialize itself so errors get thrown early
+    _ = jnp.zeros(())
     # split the data into train-validation-test
     train_batch = 5000
     val_batch = 1999

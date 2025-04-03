@@ -164,3 +164,4 @@ cython_debug/
 /src/imgui.ini
 /src/.polyscope.ini
 .idea/
+src/dof_train.py

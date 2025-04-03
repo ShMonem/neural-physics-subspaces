@@ -26,9 +26,10 @@ SRC_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT_DIR = os.path.join(SRC_DIR, "..")
 
 FRAME = 1
-RECORD_FRAME = True
+RECORD_FRAME = False
 RECORD_SNAPSHOTS = False
-NUM_SNAPSHOTS = 20000
+NUM_SNAPSHOTS = 700
+colour=(0.2, 0.1, 0.1) # blue
 def main():
     # Build command line arguments
     parser = argparse.ArgumentParser()
@@ -41,14 +42,14 @@ def main():
     parser.add_argument("--integrator", type=str, default="implicit-proximal")
     parser.add_argument("--output_dir", type=str, default="../output")
     parser.add_argument("--output_nn_dir", type=str, default="pretrained_models")
-    parser.add_argument("--subspace_name", type=str, default="_ReLU_epochs_100_rot_latent_dim_9_tranz_latent_dim_3")
-    parser.add_argument("--subspace_model", type=str, default="checkpoint_100")
-    parser.add_argument("--subspace_info", type=str, default="info_100")
+    parser.add_argument("--subspace_name", type=str, default="_ReLU_epochs_100_rot_latent_dim_9_tranz_latent_dim_0")
+    parser.add_argument("--subspace_model", type=str, default="checkpoint_60")
+    parser.add_argument("--subspace_info", type=str, default="info_60")
     parser.add_argument("--framesFolder", type=str, default="frames")
     parser.add_argument("--snapsFolder", type=str, default="snapshots")
 
     # if to use neural network
-    parser.add_argument("--use_nn_subsapce", type=str, default=False)
+    parser.add_argument("--use_nn_subsapce", type=str, default=True)
 
     # build correct paths arguments
     args = parser.parse_args()
@@ -145,7 +146,7 @@ def main():
         int_state['q_tm1'] = int_state['q_t']
         int_state['qdot_t'] = jnp.zeros_like(int_state['q_t'])
 
-        system.visualize(system_def, state_to_system(system_def, int_state['q_t']))
+        system.visualize(system_def, state_to_system(system_def, int_state['q_t']), colour=colour)
 
     def state_to_system(system_def, state):
         if use_subspace:
@@ -208,7 +209,7 @@ def main():
                 if any_changed:
                     integrators.update_state(int_opts, int_state, tmp_state_q, with_velocity=True)
                     integrators.apply_domain_projection(int_state, subspace_domain_dict)
-                    system.visualize(system_def, state_to_system(system_def, int_state['q_t']))
+                    system.visualize(system_def, state_to_system(system_def, int_state['q_t']), colour=colour)
 
                 psim.TreePop()
 
@@ -219,7 +220,7 @@ def main():
         ps.look_at((-0.00356241, 0.06179327, 0.34390159), (-0.00356241, 0.06179327, 0.03906773))
         # update visualization every frame
         if update_viz_every or run_sim:
-            system.visualize(system_def, state_to_system(system_def, int_state['q_t']))
+            system.visualize(system_def, state_to_system(system_def, int_state['q_t']), colour=colour)
 
             if run_sim and RECORD_FRAME:
                 if use_subspace:
@@ -229,7 +230,7 @@ def main():
                     output_dir = os.path.join(args.output_dir, system.problem_name, args.framesFolder)
                 if FRAME ==1:
                     ensure_dir_exists(output_dir)
-                if FRAME <= NUM_SNAPSHOTS:
+                if FRAME < NUM_SNAPSHOTS+1:
                     filename = os.path.join(output_dir, f"frame_{FRAME:05d}.png")
                     print(filename)
 
