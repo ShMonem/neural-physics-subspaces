@@ -154,39 +154,35 @@ class transf2Latent_Encoder(eqx.Module):
         if self.rot_latent_dim > 0:
             # -- from rotation to angular velocity mat
             prev_width = self.rot_dim  # first layer has full transformation dim
-            keys = jax.random.split(key, dict['MLP_hidden_layers'])  # first round of keys
             for i_layer in range(dict['MLP_hidden_layers']):
                 is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
                 # last layer would have omega dim, otherwise a user pre-defined 'width'
                 next_width = dict['omega_dim'] if is_last else dict['MLP_hidden_layer_width']
-
-                self.rot2omega_layers.append(eqx.nn.Linear(prev_width, next_width, use_bias=True, key=keys[i_layer]))
+                key, subkey = jax.random.split(key)
+                self.rot2omega_layers.append(eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
                 prev_width = next_width
 
             # -- from omega matrix and translation vector to latent space
             prev_width = dict['omega_dim']  # first layer has full transformation dim
-            key, subkey = jax.random.split(key)
-            keys2 = jax.random.split(key, dict['MLP_hidden_layers'])  # second round of keys
             for i_layer in range(dict['MLP_hidden_layers']):
                 is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
                 # last layer would have latent dim, otherwise a user pre-defined 'width'
                 next_width = self.rot_latent_dim if is_last else dict['MLP_hidden_layer_width']
+                key, subkey = jax.random.split(key)
                 self.omega2latent_layers.append(
-                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=keys2[i_layer]))
+                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
                 prev_width = next_width
 
         # Second:
         if self.tranz_latent_dim > 0:
             # -- from full translation to translation_latent vector
-            key, subkey = jax.random.split(key)
             prev_width = dict['tranz_dim']  # first layer has full transformation dim
-            keys = jax.random.split(key, dict['MLP_hidden_layers'])  # first round of keys
             for i_layer in range(dict['MLP_hidden_layers']):
                 is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
                 next_width = dict['tranz_latent_dim'] if is_last else dict['MLP_hidden_layer_width']
-
+                key, subkey = jax.random.split(key)
                 self.tranz2latent_layers.append(
-                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=keys[i_layer]))
+                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=key))
                 prev_width = next_width
 
     def __call__(self, y, return_details=False):
@@ -385,6 +381,8 @@ class TrainerModule:
         ensure_dir_exists(self.log_dir)
         # self.logger = SummaryWriter(log_dir=self.log_dir)
 
+        self.use_intermediate_vals_loss = True
+
         # tracking loss value during training
         self.training_energy_tracker = []
         self.training_epoch = []
@@ -407,7 +405,7 @@ class TrainerModule:
         return jnp.linalg.norm(omega_pred - omega) + jnp.linalg.norm(rot_pred - rot) + jnp.linalg.norm(tranz_pred - tranz)
 
     @eqx.filter_jit()
-    def train_step(self, system, system_def, opt_state, transfrm, omega=None, rot=None, tranz=None, datailed_loss=False):
+    def train_step(self, system, system_def, opt_state, transfrm, omega=None, rot=None, tranz=None):
         """
         JIT-compiled training step using jax.example_libraries.optimizers.
 
@@ -418,7 +416,7 @@ class TrainerModule:
             # re-build/update model from trainable and static parameters
             model = eqx.combine(par, eqx.filter(self.model, lambda m: not eqx.is_array(m)))
 
-            if datailed_loss:
+            if self.use_intermediate_vals_loss:
                 return self.compute_batched_detailed_loss(system, system_def, model, transfrm, omega, rot, tranz)
             else:
                 return self.compute_batched_loss(model, transfrm)
@@ -429,12 +427,12 @@ class TrainerModule:
         opt_state = self.optimizer_update(self.step, grads, opt_state)
         return opt_state, loss
 
-    def train_epoch(self, system, system_def, train_loader, omega_idx_=2, rot_idx=3, tranz_idx=4, detailed_loss=False):
+    def train_epoch(self, system, system_def, train_loader, omega_idx_=2, rot_idx=3, tranz_idx=4):
         """
         Runs one epoch of training.
         """
         losses = []
-        if detailed_loss:
+        if self.use_intermediate_vals_loss:
             for batch in train_loader:
                 data = jax.device_put(jnp.array(batch[self.loader_input_index].numpy()))
 
@@ -443,7 +441,7 @@ class TrainerModule:
                 tranz_batch = jax.device_put(jnp.array(batch[tranz_idx].numpy()))
 
                 self.opt_state, loss = self.train_step(system, system_def,self.opt_state, data,
-                                                       omega_batch, rot_batch, tranz_batch, datailed_loss=True)
+                                                       omega_batch, rot_batch, tranz_batch)
                 losses.append(jax.device_get(loss))
                 self.step += 1
         else:
@@ -455,41 +453,45 @@ class TrainerModule:
         avg_loss = np.mean(losses)
         return avg_loss
 
-    def evaluate(self, test_model, test_loader):
+    def evaluate(self, system, system_def, test_model, test_loader, omega_idx_=2, rot_idx=3, tranz_idx=4):
         """
         Evaluates the model on all input of data_loader and return average loss.
         """
         total_loss = 0
         total_samples = 0
-        for batch in test_loader:
-            batch = jax.device_put(jnp.array(batch[self.loader_input_index].numpy()))
+        for data in test_loader:
+            batch = jax.device_put(jnp.array(data[self.loader_input_index].numpy()))
             batch_size = batch.shape[0]
 
-            loss = self.compute_batched_loss(test_model, batch)
+            if self.use_intermediate_vals_loss:
+                omega_batch = jax.device_put(jnp.array(data[omega_idx_].numpy()))
+                rot_batch = jax.device_put(jnp.array(data[rot_idx].numpy()))
+                tranz_batch = jax.device_put(jnp.array(data[tranz_idx].numpy()))
+                loss = self.compute_batched_detailed_loss(system, system_def, test_model, batch, omega_batch, rot_batch, tranz_batch)
+            else:
+                loss = self.compute_batched_loss(test_model, batch)
+
             total_loss += jax.device_get(loss) * batch_size
             total_samples += batch_size
         return total_loss / total_samples
 
-    def train(self, system, system_def, train_loader, val_loader, args, nn_dict, epochs,
-              use_intermediate_nn_loss=False, save_every=10):
+    def train(self, system, system_def, train_loader, val_loader, args, nn_dict, epochs, save_every=10):
         """
         Full training loop on given number of epochs.
         """
         best_val_loss = float('inf')
         for epoch in tqdm(range(1, epochs + 1)):
             # update self.opt_state
-            avg_loss = self.train_epoch(system, system_def, train_loader, detailed_loss=use_intermediate_nn_loss)
+            avg_loss = self.train_epoch(system, system_def, train_loader)
 
             if epoch % save_every == 0:
                 # get updated autoencoder model information
                 params = self.get_params(self.opt_state)
                 model_current = eqx.combine(params, eqx.filter(self.model, lambda m: not eqx.is_array(m)))
-                val_loss = self.evaluate(model_current, val_loader)
+                val_loss = self.evaluate(system, system_def, model_current, val_loader)
                 self.training_energy_tracker.append(val_loss)
                 self.training_epoch.append(epoch)
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    self.save_model(args, nn_dict, epoch)
+                self.save_model(args, nn_dict, epoch)
 
     def save_model(self, args, nn_dict, epoch):
         """
@@ -544,14 +546,15 @@ def evaluate_autoencoder(system, system_def, args, nn_dict, rng, train_loader, v
     trainer = TrainerModule(nn_dict, rng, loader_input_index, checkpoint_path)
 
     if not pretrained:
-        trainer.train(system, system_def, train_loader, val_loader, args, nn_dict, epochs, use_intermediate_nn_loss=True)
+        trainer.train(system, system_def, train_loader, val_loader, args, nn_dict, epochs)
 
         # show loss behaviour during training
         plt.plot(trainer.training_epoch, trainer.training_energy_tracker, 'go--', label='energy vals')
         plt.xlabel('training iter')
         plt.ylabel('Energy')
         plt.yscale('log')
-
+        # plt.minorticks_off()
+        # plt.ylim([1e-5, 10])
         plt.savefig(os.path.join(trainer.log_dir, "loss_while_training.png"))
         plt.close()
 
@@ -562,6 +565,6 @@ def evaluate_autoencoder(system, system_def, args, nn_dict, rng, train_loader, v
 
     optimized_autoencoder = eqx.combine(model_params, model_static)
 
-    test_loss = trainer.evaluate(optimized_autoencoder, test_loader)
+    test_loss = trainer.evaluate(system, system_def, optimized_autoencoder, test_loader)
 
     return test_loss

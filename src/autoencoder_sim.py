@@ -17,8 +17,8 @@ from jax import debug
 # import igl
 
 # Imports from this project
-import config_geomSubspace as config
-import layers_geomSubspace as layers
+import autoencoder_config as config
+import autoencoder_layers as layers
 import integrators
 from utils import ensure_dir_exists
 
@@ -29,7 +29,7 @@ FRAME = 1
 RECORD_FRAME = False
 RECORD_SNAPSHOTS = False
 NUM_SNAPSHOTS = 700
-colour=(0.2, 0.1, 0.1) # blue
+colour=(0.0, 0.7, 0.2) # blue
 def main():
     # Build command line arguments
     parser = argparse.ArgumentParser()
@@ -42,9 +42,9 @@ def main():
     parser.add_argument("--integrator", type=str, default="implicit-proximal")
     parser.add_argument("--output_dir", type=str, default="../output")
     parser.add_argument("--output_nn_dir", type=str, default="pretrained_models")
-    parser.add_argument("--subspace_name", type=str, default="_ReLU_epochs_100_rot_latent_dim_9_tranz_latent_dim_0")
-    parser.add_argument("--subspace_model", type=str, default="checkpoint_60")
-    parser.add_argument("--subspace_info", type=str, default="info_60")
+    parser.add_argument("--subspace_name", type=str, default="_ReLU_epochs_50_rot_latent_dim_9_tranz_latent_dim_3")
+    parser.add_argument("--subspace_model", type=str, default="checkpoint_50")
+    parser.add_argument("--subspace_info", type=str, default="info_50")
     parser.add_argument("--framesFolder", type=str, default="frames")
     parser.add_argument("--snapsFolder", type=str, default="snapshots")
 

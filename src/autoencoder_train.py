@@ -47,13 +47,13 @@ import torch.utils.data as data
 # from torchvision.datasets import CIFAR10
 from torch.utils.data import Dataset, DataLoader
 
-import layers_geomSubspace as layers
+import autoencoder_layers as layers
 
 print("Device:", jax.devices()[0])
 
 import argparse
-from main_arrange_snapshots import read_snapshots
-import config_geomSubspace as config
+from autoencoder_get_snapshots import read_snapshots
+import autoencoder_config as config
 from utils import ensure_dir_exists
 
 import warnings
@@ -80,7 +80,7 @@ def main():
     parser.add_argument("--model_type", type=str, default='learnGeometricalAwareSolver')
     parser.add_argument("--activation", type=str, default='ReLU')
     parser.add_argument("--rot_subspace_dim", type=int, default=9)
-    parser.add_argument("--tranz_subspace_dim", type=int, default=0)
+    parser.add_argument("--tranz_subspace_dim", type=int, default=3)
     parser.add_argument("--numSnapshots", type=int, default=22222)
 
     # Parse arguments
@@ -94,18 +94,19 @@ def main():
     # Force jax to initialize itself so errors get thrown early
     _ = jnp.zeros(())
     # split the data into train-validation-test
-    train_batch = 5000
-    val_batch = 1999
-    test_batch = 3000
+
     batchSize = 500
 
-    train_set, val_set, test_set = data.random_split(dataset, [11111, 5555, 5556], generator=torch.Generator().manual_seed(0))
-
+    g = torch.Generator().manual_seed(1)
+    train_set, val_set, test_set = data.random_split(dataset, [11111, 5555, 5556], generator=g)
 
     # loaders for each data set
-    train_dataloader = DataLoader(train_set, batch_size=batchSize, num_workers=4, pin_memory=True, shuffle=True)
-    val_dataloader = DataLoader(val_set, batch_size=batchSize, num_workers=4, shuffle=False)
-    test_dataloader = DataLoader(test_set, batch_size=batchSize, num_workers=4, shuffle=True)
+    g1 = torch.Generator().manual_seed(24)
+    train_dataloader = DataLoader(train_set, batch_size=batchSize, num_workers=4, pin_memory=True, shuffle=True, generator=g1)
+    g2 = torch.Generator().manual_seed(15)
+    val_dataloader = DataLoader(val_set, batch_size=batchSize, num_workers=4, shuffle=False, generator=g2)
+    g3 = torch.Generator().manual_seed(77)
+    test_dataloader = DataLoader(test_set, batch_size=batchSize, num_workers=4, shuffle=True, generator=g3)
 
     ## 1. Test encoder implementation
     # Random key for initialization
@@ -164,37 +165,41 @@ def main():
     rng = random.PRNGKey(0)
     # Train the autoencoder
     model_train_dict = {}
-    epochs = 100
+    epochs = 80
 
     loader_input_index = 5  # for full transformations
-    rot_reduction_loss = []
     network_filename_dir = os.path.join(args.output_dir, args.problem_name, args.output_nn_dir)
+    rot_reduction_loss = []
 
-    # Build an informative output name
-    network_filename_base = f"{args.output_prefix}_{args.activation}_epochs_{epochs}" \
-                            f"_rot_latent_dim_{args.rot_subspace_dim}_tranz_latent_dim_{args.tranz_subspace_dim}"
-    network_filename_pre = os.path.join(network_filename_dir, network_filename_base)
+    start, end = 9 , 9
+    for rot_dim in range(start, end + 1):
+        # modify rot latent dim in both args and dict
+        args.rot_subspace_dim, nn_dict['rot_latent_dim'] = rot_dim, rot_dim
+        # Build an informative output name
+        network_filename_base = f"{args.output_prefix}_{args.activation}_epochs_{epochs}" \
+                                f"_rot_latent_dim_{args.rot_subspace_dim}_tranz_latent_dim_{args.tranz_subspace_dim}"
+        network_filename_pre = os.path.join(network_filename_dir, network_filename_base)
 
-    ensure_dir_exists(network_filename_pre)
-    print(f"Saving result to {network_filename_pre}")
+        ensure_dir_exists(network_filename_pre)
+        print(f"Saving result to {network_filename_pre}")
 
-    test_loss = layers.evaluate_autoencoder(system, system_def, args, nn_dict, rng,
-                                                train_dataloader, val_dataloader, test_dataloader,
-                                                epochs, network_filename_pre, int(loader_input_index),
-                                                pretrained=False)
+        test_loss = layers.evaluate_autoencoder(system, system_def, args, nn_dict, rng,
+                                                    train_dataloader, val_dataloader, test_dataloader,
+                                                    epochs, network_filename_pre, int(loader_input_index),
+                                                    pretrained=False)
 
-    rot_reduction_loss.append(test_loss)
+        rot_reduction_loss.append(test_loss)
 
-    # plt.figure(figsize=(6, 4))
-    # plt.plot(range(1, 9 + 1), rot_reduction_loss,
-    #          '--', color="#000", marker="*", markeredgecolor="#000", markerfacecolor="y", markersize=16)
-    # plt.title("Reconstruction error over rot latent dimensionality", fontsize=14)
-    # plt.minorticks_off()
-    # plt.xlabel('rot latent dim')
-    # plt.ylabel('Energy')
-    # plt.yscale('log')
-    # plt.savefig(os.path.join(network_filename_dir, "loss_while_training_tranz_latent_3_diff_rot_latent_dim.png"))
-    # plt.show()
+    plt.figure(figsize=(6, 4))
+    plt.plot(range(start, end  + 1), rot_reduction_loss,
+             '--', color="#000", marker="*", markeredgecolor="#000", markerfacecolor="y", markersize=16)
+    plt.title("Reconstruction error over rot latent dimensionality", fontsize=14)
+    plt.minorticks_off()
+    plt.xlabel('rot latent dim')
+    plt.ylabel('Energy')
+    plt.yscale('log')
+    plt.savefig(os.path.join(network_filename_dir, "loss_while_training_tranz_latent_3_diff_rot_latent_dim.png"))
+    plt.show()
 
 
 if __name__ == '__main__':
