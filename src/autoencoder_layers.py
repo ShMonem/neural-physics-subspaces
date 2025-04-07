@@ -398,10 +398,11 @@ class TrainerModule:
 
     def compute_batched_detailed_loss(self,system, system_def, model, data, omega, rot, tranz):
         batched_model = vmap(model, in_axes=(0, None))
-        batched_potential = vmap(system.potential_energy, in_axes=(None, 0))
         omega_pred, rot_pred, tranz_pred = batched_model(data, True)
-        # transfor_pred = jnp.concatenate([rot_pred, tranz_pred], axis=1)
+        transfor_pred = jnp.concatenate([rot_pred, tranz_pred], axis=1)
+        # batched_potential = vmap(system.potential_energy, in_axes=(None, 0))
         # E_pot = jnp.mean(batched_potential(system_def, transfor_pred))    # potential energy
+        # E_pot + jnp.linalg.norm(transfor_pred - data)
         return jnp.linalg.norm(omega_pred - omega) + jnp.linalg.norm(rot_pred - rot) + jnp.linalg.norm(tranz_pred - tranz)
 
     @eqx.filter_jit()

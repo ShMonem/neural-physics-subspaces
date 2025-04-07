@@ -26,9 +26,9 @@ SRC_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT_DIR = os.path.join(SRC_DIR, "..")
 
 FRAME = 1
-RECORD_FRAME = False
-RECORD_SNAPSHOTS = False
-NUM_SNAPSHOTS = 700
+RECORD_FRAME = False          # store frames as .png
+RECORD_SNAPSHOTS = True     # store frames information as matrices .npz to be used for training
+NUM_SNAPSHOTS = 22222
 colour=(0.0, 0.7, 0.2) # blue
 def main():
     # Build command line arguments
@@ -42,14 +42,14 @@ def main():
     parser.add_argument("--integrator", type=str, default="implicit-proximal")
     parser.add_argument("--output_dir", type=str, default="../output")
     parser.add_argument("--output_nn_dir", type=str, default="pretrained_models")
-    parser.add_argument("--subspace_name", type=str, default="_ReLU_epochs_50_rot_latent_dim_9_tranz_latent_dim_3")
-    parser.add_argument("--subspace_model", type=str, default="checkpoint_50")
-    parser.add_argument("--subspace_info", type=str, default="info_50")
+    parser.add_argument("--subspace_name", type=str, default="_ReLU_epochs_80_rot_latent_dim_9_tranz_latent_dim_3")
+    parser.add_argument("--subspace_model", type=str, default="checkpoint_80")
+    parser.add_argument("--subspace_info", type=str, default="info_80")
     parser.add_argument("--framesFolder", type=str, default="frames")
     parser.add_argument("--snapsFolder", type=str, default="snapshots")
 
     # if to use neural network
-    parser.add_argument("--use_nn_subsapce", type=str, default=True)
+    parser.add_argument("--use_nn_subsapce", type=str, default=False)
 
     # build correct paths arguments
     args = parser.parse_args()

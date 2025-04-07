@@ -99,7 +99,7 @@ def timestep_internal(system,
 def timestep(system, system_def, int_state, int_opts, subspace_fn=None, subspace_domain_dict=None,
              collect_velo_snapshots=False, file_name=""):
     if collect_velo_snapshots:
-        # linear transformations (4, 3)
+        # T_t/q_t: linear transformations (4, 3) at time t
         T_t = jnp.concatenate((system_def['fixed_pos'], int_state['q_t'])).reshape(-1, 4, 3)
         T_tm1 = jnp.concatenate((system_def['fixed_pos'], int_state['q_tm1'])).reshape(-1, 4, 3)
 
@@ -112,16 +112,16 @@ def timestep(system, system_def, int_state, int_opts, subspace_fn=None, subspace
         for bid in range(system.n_bodies):
             # positional velocity
             if bid == 0:
-                pos = np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))
-                velo = (np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))
+                pos = np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))  # position = weighted transformations
+                velo = (np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))  # velocity = position derivative
                             - np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_tm1[bid]))) / int_opts['timestep_h']
 
-                omega_bid = jnp.matmul(rot_dot_t[bid], rot_dot_t[bid])
+                omega_bid = jnp.matmul(rot_dot_t[bid], rot_t[bid].T)     # omega skew symmetric = R_dot @ R.T
                 omega = omega_bid
-                angular = jnp.reshape(np.array([
-                    omega_bid[2, 1] - omega_bid[1, 2],
-                    omega_bid[0, 2] - omega_bid[2, 0],
-                    omega_bid[1, 0] - omega_bid[0, 1]]) / 2.0, (-1, 1))
+                angular = jnp.array([     # angular velocity vector
+                    omega_bid[2, 1],
+                    omega_bid[0, 2],
+                    omega_bid[1, 0]])
             else: # TODO!
                 pos = jnp.vstack([pos, np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid])) ])  # (v_bid, 3)
                 velo = jnp.vstack([velo, (np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))

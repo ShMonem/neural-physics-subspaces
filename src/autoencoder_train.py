@@ -165,13 +165,14 @@ def main():
     rng = random.PRNGKey(0)
     # Train the autoencoder
     model_train_dict = {}
-    epochs = 80
+    epochs = 100
 
     loader_input_index = 5  # for full transformations
     network_filename_dir = os.path.join(args.output_dir, args.problem_name, args.output_nn_dir)
     rot_reduction_loss = []
 
-    start, end = 9 , 9
+    start, end = 1 , 9
+    args.output_prefix = 'Omerrnrm_p_Rerrnrm_p_terrnrm_'
     for rot_dim in range(start, end + 1):
         # modify rot latent dim in both args and dict
         args.rot_subspace_dim, nn_dict['rot_latent_dim'] = rot_dim, rot_dim
@@ -198,7 +199,8 @@ def main():
     plt.xlabel('rot latent dim')
     plt.ylabel('Energy')
     plt.yscale('log')
-    plt.savefig(os.path.join(network_filename_dir, "loss_while_training_tranz_latent_3_diff_rot_latent_dim.png"))
+
+    plt.savefig(os.path.join(network_filename_dir, args.output_prefix + "training_tranz_latent_3_diff_rot_latent_dim.png"))
     plt.show()
 
 
