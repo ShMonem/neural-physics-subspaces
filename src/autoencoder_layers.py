@@ -396,7 +396,7 @@ class TrainerModule:
         preds = batched_model(data)
         return jnp.linalg.norm(preds - data)
 
-    def compute_batched_detailed_loss(self,system, system_def, model, data, omega, rot, tranz):
+    def compute_batched_detailed_loss(self, system, system_def, model, data, omega, rot, tranz):
         batched_model = vmap(model, in_axes=(0, None))
         omega_pred, rot_pred, tranz_pred = batched_model(data, True)
         transfor_pred = jnp.concatenate([rot_pred, tranz_pred], axis=1)

@@ -27,9 +27,10 @@ ROOT_DIR = os.path.join(SRC_DIR, "..")
 
 FRAME = 1
 RECORD_FRAME = False          # store frames as .png
-RECORD_SNAPSHOTS = True     # store frames information as matrices .npz to be used for training
+RECORD_SNAPSHOTS = False     # store frames information as matrices .npz to be used for training
 NUM_SNAPSHOTS = 22222
-colour=(0.0, 0.7, 0.2) # blue
+
+colour=(0.0, 0.7, 0.2)   # change to preference
 def main():
     # Build command line arguments
     parser = argparse.ArgumentParser()
