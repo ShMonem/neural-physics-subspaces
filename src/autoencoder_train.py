@@ -26,7 +26,7 @@ from tqdm.auto import tqdm
 ## JAX
 import jax
 import jax.numpy as jnp
-from jax import random, vmap
+from jax import random, vmap, pmap
 import equinox as eqx
 # Seeding for random operations
 main_rng = random.PRNGKey(24)
@@ -49,7 +49,7 @@ from torch.utils.data import Dataset, DataLoader
 
 import autoencoder_layers as layers
 
-print("Device:", jax.devices()[0])
+print("Device:", jax.devices())
 
 import argparse
 from autoencoder_get_snapshots import read_snapshots
