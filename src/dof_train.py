@@ -8,6 +8,55 @@ import itertools
 import equinox as eqx
 import typing
 from jax.example_libraries import optimizers
+from torch.utils.data import Dataset, DataLoader
+import numpy as np
+import torch
+from tqdm import tqdm
+
+import json
+import os
+from utils import ensure_dir_exists
+import matplotlib.pyplot as plt
+
+class dof_snapshots(Dataset):
+    """
+    Data attributes for one body only
+    """
+    def __init__(self):
+        super().__init__()
+        self.dof = None
+        self.act = None
+        self.transform = None
+        self.sampler = dof_sampler()
+        self.len = -1
+
+    def sampler_config(self, num_samples=100, angle_tol=1e-2, dist_tol=1e-1):
+        self.sampler.set_num_samples_per_mast(num_samples)
+        self.sampler.set_dist_tol(dist_tol)
+        self.sampler.set_angle_tol(angle_tol)
+
+    def dataFill(self, action_lables):
+        dof, act = vmap(self.sampler.sample_pose_from_activation, in_axes=0)(action_lables)  # (num_samples*64, 6)
+        dof, act = dof.reshape(-1, 6), act.reshape(-1, 6)
+        q = vmap(dof_to_transformation, in_axes=0)(dof)
+        print("Dof samples/labels ", dof.shape)
+        print("full transformation samples", q.shape)
+
+        self.dof = dof
+        self.act = act
+        self.transform = q
+
+        self.len = self.dof.shape[0]
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx):
+        dof = np.array(self.dof[idx], dtype=np.float32)     # 6
+        act = np.array(self.act[idx], dtype=np.float32)     # 6
+        transf = np.array(self.transform[idx], dtype=np.float32)  # 6
+        return dof, act, transf
+
 
 
 def skew_to_vec(omega_hat):
@@ -116,6 +165,11 @@ class dof_sampler:
         self.dist_tol = 0.05
         self.num_samples = 10
 
+    def sampler_config(self, num_samples=100, angle_tol=1e-2, dist_tol=1e-1):
+        self.set_num_samples_per_mast(num_samples)
+        self.set_dist_tol(dist_tol)
+        self.set_angle_tol(angle_tol)
+
     def set_angle_tol(self, val):
         self.angle_tol = val
 
@@ -149,13 +203,14 @@ class dof_sampler:
 
         angle_bounds = (-jnp.pi, jnp.pi)
         pitch_bounds = (-jnp.pi / 2, jnp.pi / 2)
-        dist_bounds = (-5.0, 5.0)
+        dist_bounds = (-2.0, 2.0)
 
         def sample_one(key):
             keys = jax.random.split(key, 6)
             roll = sample_range(keys[0], activation_mask[0], *angle_bounds, self.angle_tol)
             pitch = sample_range(keys[1], activation_mask[1], *pitch_bounds, self.angle_tol)
             yaw = sample_range(keys[2], activation_mask[2], *angle_bounds, self.angle_tol)
+
             x = sample_range(keys[3], activation_mask[3], *dist_bounds, self.dist_tol)
             y = sample_range(keys[4], activation_mask[4], *dist_bounds, self.dist_tol)
             z = sample_range(keys[5], activation_mask[5], *dist_bounds, self.dist_tol)
@@ -229,9 +284,10 @@ class learn_action(eqx.Module):
             action = self.q2act_layers[i_layer](action)
             if not is_last:
                 action = self.activation(action)
-            else:
-                action = jax.nn.sigmoid(action)
-        return action
+            # else:
+            #     action = jax.nn.sigmoid(action)
+
+        return action # (action > 0.5).astype(jnp.float32)
 
 
 class learn_link(eqx.Module):
@@ -261,11 +317,18 @@ def loss_fn(params, model, target_q, target_dof, target_act):
     # param: the freshly adjusted trainable parameters
     # re-build/update model from trainable and static parameters
     model = eqx.combine(params, eqx.filter(model, lambda m: not eqx.is_array(m)))
-    model_batched = vmap(model, in_axes=0)
-    pred_dof, pred_act = model_batched(target_q)  # (batch_size, dof_dim), (batch_size, act_dim)
+    model_batched = vmap(model, in_axes=(0, None))
+    pred_dof, pred_act = model_batched(target_q, False)  # (batch_size, dof_dim), (batch_size, act_dim)
+    # jax.debug.print("pred_act is: {}",pred_act)
+    # jax.debug.print("entropy is: {}", optax.sigmoid_binary_cross_entropy(pred_act, target_act))
     loss_dof = jnp.linalg.norm(pred_dof - target_dof)    # how close to dof vals
-    loss_act = optax.sigmoid_binary_cross_entropy(pred_act, target_act).mean()    # which dofs are active
-    return loss_dof + loss_act
+
+    p_act = (pred_act > 0.9).astype(np.int32)
+    loss_act = optax.sigmoid_binary_cross_entropy(pred_act, target_act).mean() \
+               + jnp.mean(p_act == target_act) # which dofs are active
+
+    loss_dict ={"dof": loss_dof, "act": loss_act}
+    return loss_dof + loss_act, loss_dict
 
 
 def main():
@@ -273,22 +336,39 @@ def main():
     _ = jnp.zeros(())
     # All possible dof activations
     action_lables = generate_all_activation_combinations()  # (64, 6)
-    print(action_lables.shape)
-    # dof values sampler
-    sampler = dof_sampler()
-    sampler.set_num_samples_per_mast(10)
-    sampler.set_dist_tol(1e-1)
-    sampler.set_angle_tol(1e-2)
+    # dof values train snapshots
+    dataset = dof_snapshots()
+    dataset.sampler_config(num_samples=500, angle_tol=1e-2, dist_tol=1e-1)
+    dataset.dataFill(action_lables)
 
-    dof_samples, act_samples = vmap(sampler.sample_pose_from_activation, in_axes=0)(action_lables)  # (num_samples*64, 6)
-    dof_samples, act_samples = dof_samples.reshape(-1, 6), act_samples.reshape(-1, 6)
-    print(dof_samples.shape)
-    q_samples = vmap(dof_to_transformation, in_axes=0)(dof_samples)
-    print(q_samples.shape)
+    # loaders for each data set
+    g1 = torch.Generator().manual_seed(24)
+    train_dataloader = DataLoader(dataset, batch_size=500, num_workers=4, pin_memory=True, shuffle=True, generator=g1)
+
+    # test sample labels
+    labels = jnp.array([[1, 0, 0, 0, 0, 0], [1, 0, 0, 1, 1, 0], [1, 0, 1, 0, 0, 0],
+                        [1, 1, 0, 0, 0, 1], [1, 1, 1, 0, 0, 0], [1, 1, 0, 0, 1, 1]])
+    sampler = dof_sampler()
+    sampler.sampler_config(num_samples=500, angle_tol=1e-2, dist_tol=1e-1)
+    dof_batch, act_batch = vmap(sampler.sample_pose_from_activation, in_axes=0)(labels)
+    dof_batch, act_batch = dof_batch.reshape(-1, 6), act_batch.reshape(-1, 6)
+    q_batch = vmap(dof_to_transformation, in_axes=0)(dof_batch)
+
+    def check_accuracy(model, dof, act, q, step, loss,  loss_dof, loss_act):
+
+        p_dof, p_act = vmap(model, in_axes=0)(q)
+        p_act = (p_act > 0.9).astype(np.int32)
+        acc_dof = np.linalg.norm(p_dof - dof)
+        epo_test_dof.append(acc_dof)
+        acc_act = np.mean(p_act == act) * 100
+        epo_test_act.append(acc_act)
+        print("\n step", step)
+        print("train dof/act loss", loss_dof, "and", loss_act)
+        print("test dof/act loss", acc_dof, "and accuracy", acc_act, "%")
 
     dict = {}
     dict['MLP_hidden_layers'] = 3
-    dict['MLP_hidden_layer_width'] = 20
+    dict['MLP_hidden_layer_width'] = 60
 
     # adam returns init_fun, update_fun, get_parameters
     optimizer_init, optimizer_update, get_params = optimizers.adam(1e-3)
@@ -299,28 +379,85 @@ def main():
 
     # Training step
     @eqx.filter_jit
-    def train_step(step, model, opt_state, q, dof, act):
-        param = get_params(opt_state)
-        loss, grads = jax.value_and_grad(loss_fn)(param, model, q, dof, act)
-        opt_state = optimizer_update(step, grads, opt_state)
-        # re-build/update model from trainable and static parameters
-        model = eqx.combine(params, eqx.filter(model, lambda m: not eqx.is_array(m)))
-        return model, opt_state, loss
+    def train_eposh(step, model, train_loader, opt_state):
+        losses = []
+        loss_dof = []
+        loss_act = []
+        for batch in train_loader:
+            dof = jax.device_put(jnp.array(batch[0].numpy()))
+            act = jax.device_put(jnp.array(batch[1].numpy()))
+            q = jax.device_put(jnp.array(batch[2].numpy()))
+
+            #train step
+            param = get_params(opt_state)
+            (loss, loss_dict), grads = jax.value_and_grad(loss_fn, has_aux=True)(param, model, q, dof, act)
+            opt_state = optimizer_update(step, grads, opt_state)
+
+            losses.append(jax.device_get(loss))
+            loss_dof.append(jax.device_get(loss_dict["dof"]))
+            loss_act.append(jax.device_get(loss_dict["act"]))
+            # re-build/update model from trainable and static parameters
+            param = get_params(opt_state)
+            model = eqx.combine(param, eqx.filter(model, lambda m: not eqx.is_array(m)))
+
+        return model, opt_state, losses, loss_dof, loss_act
 
     step = 0
-    for epoch in range(500):
-        model, opt_state, loss = train_step(step, model, opt_state, q_samples, dof_samples, act_samples)
-        print(step, loss)
+    save_every = 10
+    epochs = 200
+
+    epo_loss_dof = []
+    epo_loss_act = []
+
+    epo_test_dof = []
+    epo_test_act = []
+    path = "../output/bar/dof_training"
+    ensure_dir_exists(path)
+    for epoch in tqdm(range(1, epochs + 1)):
+        model, opt_state, losses, loss_dof, loss_act = train_eposh(step, model, train_dataloader, opt_state)
+        loss = np.mean(losses)
+        loss_dof = np.mean(loss_dof)
+        loss_act = np.mean(loss_act)
+        epo_loss_dof.append(loss_dof)
+        epo_loss_act.append(loss_act)
+        check_accuracy(model, dof_batch, act_batch, q_batch, step, loss, loss_dof, loss_act)
         step += 1
 
-    activation = jnp.array([1, 0, 1, 1, 0, 0])  # Roll, Yaw, X are active
+        if epoch % save_every == 0:
+            # save the model parameters as Pytree: .eqx
 
-    dof_batch, act_batch = sampler.sample_pose_from_activation(activation)
-    q_bach = vmap(dof_to_transformation, in_axes=0)(dof_batch)
-    p_dof, p_act = vmap(model, in_axes=0)(q_bach)
+            eqx.tree_serialise_leaves(os.path.join(path, f"checkpoint_{epoch}_autoencoder.eqx"), model)
 
-    print((p_act.sum(axis=0)/p_act.shape[0] > 0.5).astype(jnp.int32))
-    print(p_act.sum(axis=0)/p_act.shape[0])
+            # store the nn dict used to construct the autoencoder: .json
+            with open(os.path.join(path, f'checkpoint_{epoch}.json'), 'w') as json_file:
+                json_file.write(json.dumps(dict))
+
+    # Create 2x2 grid of subplots
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+    x = range(1, epochs + 1)
+    # Top-left
+    axes[0, 0].plot(x, epo_loss_dof)
+    axes[0, 0].set_title("train loss dof")
+
+    # Top-right
+    axes[0, 1].plot(x, epo_loss_act, color='orange')
+    axes[0, 1].set_title("train loss action")
+
+    # Bottom-left
+    axes[1, 0].plot(x, epo_test_dof, color='green')
+    axes[1, 0].set_title("test dof error")
+
+    # Bottom-right
+    axes[1, 1].plot(x, epo_test_act, color='red')
+    axes[1, 1].set_title("test action accuracy")
+
+    # Add overall figure title (optional)
+    fig.suptitle(f"DOF trainig chack {epochs}", fontsize=16)
+
+    # Adjust spacing
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.92)  # leave space for suptitle
+    plt.savefig(os.path.join(path, f"accuracy_check{epochs}.png"))
 
 
 if __name__ == '__main__':

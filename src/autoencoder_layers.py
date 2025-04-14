@@ -127,46 +127,15 @@ def exp_omega(omega_flat_column):
     return expm_matrices.reshape(-1)
 
 
-class learn_dof(eqx.Module):
-    q_dim: int
-    dof_dim: int
-    T2dof_layers: typing.List[eqx.nn.Linear]
-    activation: typing.Callable
-
-    def __init__(self, dict, key):
-        # MLP layers
-        self.activation = str_to_act(dict['activation'])
-        self.q_dim = 12  # flatten linear transformation
-        self.dof_dim = 6  # poses (roll, pitch, yaw, x, y, z)
-
-        prev_width = self.q_dim  # first layer has full transformation dim
-        for i_layer in range(dict['MLP_hidden_layers']):
-            is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
-            # last layer would have dof dim, otherwise a user pre-defined 'width'
-            next_width = self.dof_dim if is_last else dict['MLP_hidden_layer_width']
-            key, subkey = jax.random.split(key)
-            self.T2dof_layers.append(eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
-            prev_width = next_width
-
-    def __call__(self, y, return_details=False):
-
-        for i_layer in range(len(self.T2dof_layers)):
-            is_last = (i_layer + 1 == len(self.T2dof_layers))
-            y = self.T2dof_layers[i_layer](y)
-            if not is_last:
-                y = self.activation(y)
-
-        return y
-
 class transf2Latent_Encoder(eqx.Module):
 
-    # rot_dim : int
-    # rot_latent_dim: int
-    # tranz_dim: int
-    # tranz_latent_dim: int
-    q_dim: int
-    dof_dim: int
-    T2dof_layers: typing.List[eqx.nn.Linear]
+    rot_dim : int
+    rot_latent_dim: int
+    tranz_dim: int
+    tranz_latent_dim: int
+    rot2omega_layers: typing.List[eqx.nn.Linear]
+    omega2latent_layers: typing.List[eqx.nn.Linear]
+    tranz2latent_layers: typing.List[eqx.nn.Linear]
     activation: typing.Callable
 
     def __init__(self, dict, key):
@@ -175,25 +144,46 @@ class transf2Latent_Encoder(eqx.Module):
         self.rot2omega_layers = []
         self.tranz2latent_layers = []
         self.omega2latent_layers = []
-        # self.rot_dim = dict['rot_dim']
-        # self.rot_latent_dim = dict['rot_latent_dim']
-        # self.tranz_dim = dict['tranz_dim']
-        # self.tranz_latent_dim = dict['tranz_latent_dim']
-
-        self.q_dim = 12    # flatten linear transformation
-        self.dof_dim = 6   # poses (roll, pitch, yaw, x, y, z)
+        self.rot_dim = dict['rot_dim']
+        self.rot_latent_dim = dict['rot_latent_dim']
+        self.tranz_dim = dict['tranz_dim']
+        self.tranz_latent_dim = dict['tranz_latent_dim']
         # building the layers
 
         # First:
-        prev_width = self.q_dim  # first layer has full transformation dim
-        for i_layer in range(dict['MLP_hidden_layers']):
-            is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
-            # last layer would have dof dim, otherwise a user pre-defined 'width'
-            next_width = self.dof_dim if is_last else dict['MLP_hidden_layer_width']
-            key, subkey = jax.random.split(key)
-            self.rot2omega_layers.append(eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
-            prev_width = next_width
+        if self.rot_latent_dim > 0:
+            # -- from rotation to angular velocity mat
+            prev_width = self.rot_dim  # first layer has full transformation dim
+            for i_layer in range(dict['MLP_hidden_layers']):
+                is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
+                # last layer would have omega dim, otherwise a user pre-defined 'width'
+                next_width = dict['omega_dim'] if is_last else dict['MLP_hidden_layer_width']
+                key, subkey = jax.random.split(key)
+                self.rot2omega_layers.append(eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
+                prev_width = next_width
 
+            # -- from omega matrix and translation vector to latent space
+            prev_width = dict['omega_dim']  # first layer has full transformation dim
+            for i_layer in range(dict['MLP_hidden_layers']):
+                is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
+                # last layer would have latent dim, otherwise a user pre-defined 'width'
+                next_width = self.rot_latent_dim if is_last else dict['MLP_hidden_layer_width']
+                key, subkey = jax.random.split(key)
+                self.omega2latent_layers.append(
+                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
+                prev_width = next_width
+
+        # Second:
+        if self.tranz_latent_dim > 0:
+            # -- from full translation to translation_latent vector
+            prev_width = dict['tranz_dim']  # first layer has full transformation dim
+            for i_layer in range(dict['MLP_hidden_layers']):
+                is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
+                next_width = dict['tranz_latent_dim'] if is_last else dict['MLP_hidden_layer_width']
+                key, subkey = jax.random.split(key)
+                self.tranz2latent_layers.append(
+                    eqx.nn.Linear(prev_width, next_width, use_bias=True, key=key))
+                prev_width = next_width
 
     def __call__(self, y, return_details=False):
         # MLP layes
@@ -406,13 +396,12 @@ class TrainerModule:
         preds = batched_model(data)
         return jnp.linalg.norm(preds - data)
 
-    def compute_batched_detailed_loss(self, system, system_def, model, data, omega, rot, tranz):
+    def compute_batched_detailed_loss(self,system, system_def, model, data, omega, rot, tranz):
         batched_model = vmap(model, in_axes=(0, None))
+        batched_potential = vmap(system.potential_energy, in_axes=(None, 0))
         omega_pred, rot_pred, tranz_pred = batched_model(data, True)
-        transfor_pred = jnp.concatenate([rot_pred, tranz_pred], axis=1)
-        # batched_potential = vmap(system.potential_energy, in_axes=(None, 0))
+        # transfor_pred = jnp.concatenate([rot_pred, tranz_pred], axis=1)
         # E_pot = jnp.mean(batched_potential(system_def, transfor_pred))    # potential energy
-        # E_pot + jnp.linalg.norm(transfor_pred - data)
         return jnp.linalg.norm(omega_pred - omega) + jnp.linalg.norm(rot_pred - rot) + jnp.linalg.norm(tranz_pred - tranz)
 
     @eqx.filter_jit()
