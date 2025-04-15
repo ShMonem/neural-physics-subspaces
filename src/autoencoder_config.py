@@ -12,7 +12,7 @@ def add_system_args(parser):
     # parser.add_argument("--system_name", type=str, required=True)
     # parser.add_argument("--problem_name", type=str, required=True)
     parser.add_argument("--system_name", type=str, default="rigid3d")   # adjust --
-    parser.add_argument("--problem_name", type=str, default="bar")    # adjust --
+    parser.add_argument("--problem_name", type=str, default="one_joint")    # adjust --
     parser.add_argument("--timestep_h", type=float, default=0.05)
 
 
@@ -37,7 +37,22 @@ def add_jax_args(parser):
     parser.add_argument("--debug-nans", action='store_true')
     parser.add_argument("--enable_double_precision", action='store_true')
 
+#  Arguments specific to this program
+def add_case_specific_arguments(parser):
+    #  Arguments specific to this program
+    parser.add_argument("--output_dir", type=str, default="../output")
+    parser.add_argument("--output_nn_dir", type=str, default="pretrained_models")
+    parser.add_argument("--snapshots_input_dir", type=str, default="snapshots")
 
+    parser.add_argument("--output_prefix", type=str, default="")
+
+    # network defaults
+    parser.add_argument("--subspace_domain_type", type=str, default='normal')
+    parser.add_argument("--model_type", type=str, default='learnGeometricalAwareSolver')
+    parser.add_argument("--activation", type=str, default='ReLU')
+    parser.add_argument("--rot_subspace_dim", type=int, default=9)
+    parser.add_argument("--tranz_subspace_dim", type=int, default=3)
+    parser.add_argument("--numSnapshots", type=int, default=1000)
 def process_jax_args(args):
 
     if args.log_compiles:

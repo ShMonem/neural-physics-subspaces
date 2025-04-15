@@ -96,46 +96,35 @@ def timestep_internal(system,
     return int_state, other_outs
 
 
+def store_snapshots(system, system_def, int_state, int_opts, file_name):
+    # T_t/q_t: linear transformations (4, 3) at time t
+    T_t = jnp.concatenate((system_def['fixed_pos'], int_state['q_t'])).reshape(-1, 4, 3)
+    T_tm1 = jnp.concatenate((system_def['fixed_pos'], int_state['q_tm1'])).reshape(-1, 4, 3)
+
+    rot_t = T_t[:, :3, :]  # rotational part
+    translation = T_t[:, 3, :]  # rotational part
+    rot_dot_t = (rot_t - jnp.concatenate((system_def['fixed_pos'], int_state['q_tm1'])).reshape(-1, 4, 3)[:, :3, :]) \
+                / int_opts['timestep_h']
+
+    pos, velo, omega, angular = [], [], [], []
+    for bid in range(system.n_bodies):
+        pos_bid = np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))  # position = weighted transformations
+        velo_bid = (np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))  # velocity = position derivative
+                - np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_tm1[bid]))) / int_opts['timestep_h']
+
+        # omega skew symmetric = R_dot @ R.T
+        omega_bid = jnp.matmul(rot_dot_t[bid], rot_t[bid].T)
+        # angular velocity vector
+        angular_bid = jnp.array([omega_bid[2, 1], omega_bid[0, 2], omega_bid[1, 0]])
+
+        np.savez(file_name +"_body_" + str(bid) +".npz", omega_mat=omega_bid, angular=angular_bid,
+             rot=rot_t[bid], vel=velo_bid, pos=pos_bid, tranz=translation[bid], full_transform=T_t[bid], dt=int_opts['timestep_h'])
+
+
 def timestep(system, system_def, int_state, int_opts, subspace_fn=None, subspace_domain_dict=None,
              collect_velo_snapshots=False, file_name=""):
     if collect_velo_snapshots:
-        # T_t/q_t: linear transformations (4, 3) at time t
-        T_t = jnp.concatenate((system_def['fixed_pos'], int_state['q_t'])).reshape(-1, 4, 3)
-        T_tm1 = jnp.concatenate((system_def['fixed_pos'], int_state['q_tm1'])).reshape(-1, 4, 3)
-
-        rot_t = T_t[:, :3, :]   # rotational part
-        translation = T_t[:, 3, :]   # rotational part
-        rot_dot_t = (rot_t - jnp.concatenate((system_def['fixed_pos'], int_state['q_tm1'])).reshape(-1, 4, 3)[:, :3, :]) \
-                  / int_opts['timestep_h']
-
-        pos, velo, omega, angular = None, None, None, None
-        for bid in range(system.n_bodies):
-            # positional velocity
-            if bid == 0:
-                pos = np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))  # position = weighted transformations
-                velo = (np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))  # velocity = position derivative
-                            - np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_tm1[bid]))) / int_opts['timestep_h']
-
-                omega_bid = jnp.matmul(rot_dot_t[bid], rot_t[bid].T)     # omega skew symmetric = R_dot @ R.T
-                omega = omega_bid
-                angular = jnp.array([     # angular velocity vector
-                    omega_bid[2, 1],
-                    omega_bid[0, 2],
-                    omega_bid[1, 0]])
-            else: # TODO!
-                pos = jnp.vstack([pos, np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid])) ])  # (v_bid, 3)
-                velo = jnp.vstack([velo, (np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_t[bid]))
-                            - np.array(jnp.matmul(system.bodiesRen[bid]['W'], T_tm1[bid]))) / int_opts['timestep_h']])  # (v_bid, 3)
-                # Extract angular velocity from skew-symmetric matrix
-                omega_bid = jnp.matmul(rot_dot_t[bid], rot_dot_t[bid])
-                omega = jnp.vstack([omega, omega_bid])
-                angular = jnp.vstack([angular, jnp.reshape(np.array([
-                    omega_bid[2, 1] - omega_bid[1, 2],
-                    omega_bid[0, 2] - omega_bid[2, 0],
-                    omega_bid[1, 0] - omega_bid[0, 1]]) / 2.0, (-1, 1))])
-
-        np.savez(file_name + ".npz", omega_mat=omega, angular=angular,
-                 rot=rot_t, vel=velo, pos=pos, tranz=translation, full_transform=T_t, dt=int_opts['timestep_h'])
+        store_snapshots(system, system_def, int_state, int_opts, file_name)
 
     # Pass args along, but tuple-ify the dict, so we can hash it
     new_int_state, other_outs = timestep_internal(

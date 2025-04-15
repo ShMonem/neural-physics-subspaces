@@ -30,7 +30,7 @@ RECORD_FRAME = False          # store frames as .png
 RECORD_SNAPSHOTS = False     # store frames information as matrices .npz to be used for training
 NUM_SNAPSHOTS = 22222
 
-colour=(0.0, 0.7, 0.2)   # change to preference
+# colour=(0.0, 0.7, 0.2)   # change to preference
 def main():
     # Build command line arguments
     parser = argparse.ArgumentParser()
@@ -67,6 +67,7 @@ def main():
     system, system_def = config.construct_system_from_name(args.system_name, args.problem_name)
 
     # Initialize polyscope
+    ps.set_verbosity(3)
     ps.init()
     ps.set_ground_plane_mode('none')
 
@@ -147,7 +148,7 @@ def main():
         int_state['q_tm1'] = int_state['q_t']
         int_state['qdot_t'] = jnp.zeros_like(int_state['q_t'])
 
-        system.visualize(system_def, state_to_system(system_def, int_state['q_t']), colour=colour)
+        system.visualize(system_def, state_to_system(system_def, int_state['q_t']))#, colour=colour)
 
     def state_to_system(system_def, state):
         if use_subspace:
@@ -210,7 +211,7 @@ def main():
                 if any_changed:
                     integrators.update_state(int_opts, int_state, tmp_state_q, with_velocity=True)
                     integrators.apply_domain_projection(int_state, subspace_domain_dict)
-                    system.visualize(system_def, state_to_system(system_def, int_state['q_t']), colour=colour)
+                    system.visualize(system_def, state_to_system(system_def, int_state['q_t']))#, colour=colour)
 
                 psim.TreePop()
 
@@ -218,10 +219,12 @@ def main():
         integrators.build_ui(int_opts, int_state)
         system.build_system_ui(system_def)
 
-        ps.look_at((-0.00356241, 0.06179327, 0.34390159), (-0.00356241, 0.06179327, 0.03906773))
+        # ps.look_at((-0.00356241, 0.06179327, 0.34390159), (-0.00356241, 0.06179327, 0.03906773))
         # update visualization every frame
         if update_viz_every or run_sim:
-            system.visualize(system_def, state_to_system(system_def, int_state['q_t']), colour=colour)
+            system.visualize(system_def, state_to_system(system_def, int_state['q_t']))#, colour=colour)
+            if RECORD_SNAPSHOTS and FRAME ==1:
+                ensure_dir_exists(os.path.join(args.output_dir, system.problem_name, args.snapsFolder))
 
             if run_sim and RECORD_FRAME:
                 if use_subspace:
@@ -231,6 +234,7 @@ def main():
                     output_dir = os.path.join(args.output_dir, system.problem_name, args.framesFolder)
                 if FRAME ==1:
                     ensure_dir_exists(output_dir)
+
                 if FRAME < NUM_SNAPSHOTS+1:
                     filename = os.path.join(output_dir, f"frame_{FRAME:05d}.png")
                     print(filename)

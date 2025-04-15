@@ -18,6 +18,10 @@ import os
 from utils import ensure_dir_exists
 import matplotlib.pyplot as plt
 
+import argparse
+from autoencoder_get_snapshots import read_snapshots
+import autoencoder_config as config
+
 class dof_snapshots(Dataset):
     """
     Data attributes for one body only
@@ -123,8 +127,8 @@ def dof_to_transformation(pos):
 
     # Compose rotation: R = Rz @ Ry @ Rx (ZYX order)
     R = Rz @ Ry @ Rx
+    # assert_orthogonal(R)
 
-    # Translation as the last row
     return jnp.vstack([R, jnp.array([[x, y, z]])]).reshape(-1)  # q: shape (4, 3)
 
 
@@ -331,26 +335,27 @@ def loss_fn(params, model, target_q, target_dof, target_act):
     return loss_dof + loss_act, loss_dict
 
 
-def main():
+def train_dof_nn(save_every=10, epochs=200, num_train_samples_per_mask=100,
+                 num_test_samples_per_mast=200, batchsize=500):
     # Force jax to initialize itself so errors get thrown early
     _ = jnp.zeros(())
     # All possible dof activations
     action_lables = generate_all_activation_combinations()  # (64, 6)
     # dof values train snapshots
     dataset = dof_snapshots()
-    dataset.sampler_config(num_samples=500, angle_tol=1e-2, dist_tol=1e-1)
+    dataset.sampler_config(num_samples=num_train_samples_per_mask, angle_tol=1e-2, dist_tol=1e-1)
     dataset.dataFill(action_lables)
 
     # loaders for each data set
     g1 = torch.Generator().manual_seed(24)
-    train_dataloader = DataLoader(dataset, batch_size=500, num_workers=4, pin_memory=True, shuffle=True, generator=g1)
+    train_dataloader = DataLoader(dataset, batch_size=batchsize, num_workers=4, pin_memory=True, shuffle=True, generator=g1)
 
     # test sample labels
-    labels = jnp.array([[1, 0, 0, 0, 0, 0], [1, 0, 0, 1, 1, 0], [1, 0, 1, 0, 0, 0],
-                        [1, 1, 0, 0, 0, 1], [1, 1, 1, 0, 0, 0], [1, 1, 0, 0, 1, 1]])
+    # labels = jnp.array([[1, 0, 0, 0, 0, 0], [1, 0, 0, 1, 1, 0], [1, 0, 1, 0, 0, 0],
+    #                     [1, 1, 0, 0, 0, 1], [1, 1, 1, 0, 0, 0], [1, 1, 0, 0, 1, 1]])
     sampler = dof_sampler()
-    sampler.sampler_config(num_samples=500, angle_tol=1e-2, dist_tol=1e-1)
-    dof_batch, act_batch = vmap(sampler.sample_pose_from_activation, in_axes=0)(labels)
+    sampler.sampler_config(num_samples=num_test_samples_per_mast, angle_tol=1e-2, dist_tol=1e-1)
+    dof_batch, act_batch = vmap(sampler.sample_pose_from_activation, in_axes=(0, None))(action_lables, jax.random.PRNGKey(42))
     dof_batch, act_batch = dof_batch.reshape(-1, 6), act_batch.reshape(-1, 6)
     q_batch = vmap(dof_to_transformation, in_axes=0)(dof_batch)
 
@@ -403,15 +408,13 @@ def main():
         return model, opt_state, losses, loss_dof, loss_act
 
     step = 0
-    save_every = 10
-    epochs = 200
 
     epo_loss_dof = []
     epo_loss_act = []
 
     epo_test_dof = []
     epo_test_act = []
-    path = "../output/bar/dof_training"
+    path = "../output/dof_training"
     ensure_dir_exists(path)
     for epoch in tqdm(range(1, epochs + 1)):
         model, opt_state, losses, loss_dof, loss_act = train_eposh(step, model, train_dataloader, opt_state)
@@ -458,6 +461,57 @@ def main():
     plt.tight_layout()
     plt.subplots_adjust(top=0.92)  # leave space for suptitle
     plt.savefig(os.path.join(path, f"accuracy_check{epochs}.png"))
+
+def load_model(dir, epoch, nn_type):
+    """
+    Loads model parameters and optimizer state.
+    """
+    # load autoencoder dictionary .json
+    with open(os.path.join(dir, f'checkpoint_{epoch}.json'), 'r') as json_file:
+        model_dict = json.loads(json_file.read())
+
+    autoencoder = nn_type(model_dict)
+    _, params_static = eqx.partition(autoencoder, eqx.is_array)
+
+    # load autoencoder parameters (optimized weights and bias) .json
+    model_params = eqx.tree_deserialise_leaves(os.path.join(dir, f"checkpoint_{epoch}_autoencoder.eqx"), autoencoder)
+
+    return model_params, params_static
+
+def main():
+    # train a nn to learn active DOFs
+    # train_dof_nn(save_every=10,
+    #              epochs=200,
+    #              num_train_samples_per_mask=100,
+    #              num_test_samples_per_mast=200,
+    #              batchsize=500)
+
+    #  load nn from .eqx and test some FOM rigid bodies
+
+    # Build command line arguments
+    parser = argparse.ArgumentParser()
+
+    # Shared arguments
+    config.add_system_args(parser)
+    config.add_learning_args(parser) # Parse arguments
+    config.add_case_specific_arguments(parser)
+    args = parser.parse_args()
+
+    # Build the system object
+    system, system_def = config.construct_system_from_name(args.system_name, args.problem_name)
+
+    actor, nn_dict = read_snapshots(args)
+
+    epochs = 200
+    path = "../output/dof_training/"
+    model_params, model_static = load_model(path, epochs, nn_type=learn_link)
+    model = eqx.combine(model_params, model_static)
+
+    for bid in range(system.n_bodies):
+        p_dof, p_act = vmap(model, in_axes=0)(actor.bodies[bid].fullT)
+        p_act = np.sum((p_act > 0.9).astype(np.int32), axis=0)/actor.bodies[bid].fullT.shape[0]
+
+        print("\n step", p_act)
 
 
 if __name__ == '__main__':

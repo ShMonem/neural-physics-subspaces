@@ -389,7 +389,7 @@ class Rigid3DSystem:
 
             psim.TreePop()
 
-    def visualize(self, system_def, x, name="rigid3d", prefix='', transparency=1., colour=(0.0, 1.0, 0.0)):
+    def visualize(self, system_def, x, name="rigid3d", prefix='', transparency=1., colour=None):
 
         xr = jnp.concatenate((system_def['fixed_pos'],x)).reshape(-1,4,3)
 
@@ -407,10 +407,10 @@ class Rigid3DSystem:
             # print('camera_pos',camera_pos )
             # print('center', center)
             # ps.look_at(camera_pos, center)
-
-
-            ps_body = ps.register_surface_mesh("body" + prefix + str(bid), v, f, color=colour)
-
+            if colour is not None:
+                ps_body = ps.register_surface_mesh("body" + prefix + str(bid), v, f, color=colour)
+            else:
+                ps_body = ps.register_surface_mesh("body" + prefix + str(bid), v, f)
 
             if transparency < 1.:
                 ps_body.set_transparency(transparency)
