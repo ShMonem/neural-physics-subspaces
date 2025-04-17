@@ -22,6 +22,9 @@ import argparse
 from autoencoder_get_snapshots import read_snapshots
 import autoencoder_config as config
 
+print("Device:", jax.devices())
+
+
 class dof_snapshots(Dataset):
     """
     Data attributes for one body only
