@@ -41,14 +41,14 @@ class dof_snapshots(Dataset):
 
     def dataFill(self, action_lables):
         dof, act = vmap(self.sampler.sample_pose_from_activation, in_axes=0)(action_lables)  # (num_samples*64, 6)
-        dof, act = dof.reshape(-1, 6), act.reshape(-1, 6)
-        q = vmap(dof_to_transformation, in_axes=0)(dof)
+        dof, act = jnp.swapaxes(dof, 0, 1), jnp.swapaxes(act, 0, 1)
+        q = vmap(vmap(dof_to_transformation, in_axes=0), in_axes=0)(dof)
         print("Dof samples/labels ", dof.shape)
         print("full transformation samples", q.shape)
 
         self.dof = dof
         self.act = act
-        self.transform = q
+        self.transform = q.reshape(act.shape[0], -1, 12)
 
         self.len = self.dof.shape[0]
 
@@ -78,7 +78,7 @@ def extract_angular_velocity(T):
     - omega_hat: angular velocity matrix (3x3)
     - omega_vec: angular velocity vector (3,)
     Look modern robotics book
-    From Lie theory, for any rotation matrix R∈SO(3)R∈SO(3), we have:
+    From Lie theory, for any rotation matrix RâˆˆSO(3)RâˆˆSO(3), we have:
     omega = log(R)
           = (theta/ 2 sin(theta)) (R - R^T)
     theta = cos^-1 ((tr(r)-1)/2)
@@ -258,6 +258,43 @@ class learn_dof(eqx.Module):
         return dof
 
 
+# class learn_action(eqx.Module):
+#     q_dim: int
+#     dof_dim: int
+#     q2act_layers: typing.List[eqx.nn.Linear]
+#     activation: typing.Callable
+#
+#     def __init__(self, dict, key):
+#         # MLP layers
+#         self.activation = jax.nn.relu
+#         self.q_dim = 12  # flatten linear transformation
+#         self.dof_dim = 6  # poses (roll, pitch, yaw, x, y, z)
+#         self.q2act_layers = []
+#
+#         prev_width = self.dof_dim  # first layer coms from dof
+#         for i_layer in range(dict['MLP_hidden_layers']):
+#             is_last = (i_layer + 1 == dict['MLP_hidden_layers'])
+#             # last layer would have dof dim, otherwise a user pre-defined 'width'
+#             next_width = self.dof_dim if is_last else dict['MLP_hidden_layer_width']  # last layer 6 dof_act
+#             key, subkey = jax.random.split(key)
+#             self.q2act_layers.append(eqx.nn.Linear(prev_width, next_width, use_bias=True, key=subkey))
+#             prev_width = next_width
+#
+#     def __call__(self, z):
+#         # determine which dofs are active
+#         action = z
+#         for i_layer in range(len(self.q2act_layers)):
+#             is_last = (i_layer + 1 == len(self.q2act_layers))
+#             action = self.q2act_layers[i_layer](action)
+#             if not is_last:
+#                 action = self.activation(action)
+#             # else:
+#             #     action = jax.nn.sigmoid(action)
+#
+#         return action # (action > 0.5).astype(jnp.float32)
+
+
+
 class learn_action(eqx.Module):
     q_dim: int
     dof_dim: int
@@ -293,13 +330,13 @@ class learn_action(eqx.Module):
 
         return action # (action > 0.5).astype(jnp.float32)
 
-
 class learn_link(eqx.Module):
     dof_branch: learn_dof
     action_branch: learn_action
+    train: bool
 
-    def __init__(self, dict, rngkey=None):
-
+    def __init__(self, dict, rngkey=None, training_phase=True):
+        self.train = training_phase
         if rngkey is None:
             rngkey = jax.random.PRNGKey(0)
 
@@ -310,10 +347,14 @@ class learn_link(eqx.Module):
         self.dof_branch = jax.tree_util.tree_map(lambda x: x.astype(jnp.float32) if eqx.is_array(x) else x, dof_branch)
         self.action_branch = jax.tree_util.tree_map(lambda x: x.astype(jnp.float32) if eqx.is_array(x) else x, action_branch)
 
-    def __call__(self, y, return_details=False):
+    def __call__(self, y):
 
-        pred_q = self.dof_branch(y)
-        pred_action = self.action_branch(pred_q)
+        if self.train:
+            pred_q = vmap(vmap(self.dof_branch, in_axes=0), in_axes=0)(y)
+            pred_action = vmap(vmap(self.action_branch, in_axes=0), in_axes=0)(pred_q)
+        else:
+            pred_q = vmap(self.dof_branch, in_axes=0)(y)
+            pred_action = vmap(self.action_branch, in_axes=0)(pred_q)
         return pred_q, pred_action
 
 
@@ -321,18 +362,20 @@ def loss_fn(params, model, target_q, target_dof, target_act):
     # param: the freshly adjusted trainable parameters
     # re-build/update model from trainable and static parameters
     model = eqx.combine(params, eqx.filter(model, lambda m: not eqx.is_array(m)))
-    model_batched = vmap(model, in_axes=(0, None))
-    pred_dof, pred_act = model_batched(target_q, False)  # (batch_size, dof_dim), (batch_size, act_dim)
-    # jax.debug.print("pred_act is: {}",pred_act)
-    # jax.debug.print("entropy is: {}", optax.sigmoid_binary_cross_entropy(pred_act, target_act))
-    loss_dof = jnp.linalg.norm(pred_dof - target_dof)    # how close to dof vals
+    # model_batched = vmap(vmap(model, in_axes=0), in_axes=0)
+    pred_dof, pred_act = model(target_q)
 
-    p_act = (pred_act > 0.9).astype(np.int32)
-    loss_act = optax.sigmoid_binary_cross_entropy(pred_act, target_act).mean() \
-               + jnp.mean(p_act == target_act) # which dofs are active
+    loss_dof = jnp.sum(optax.l2_loss(pred_dof - target_dof))/pred_dof.size    # how close to dof vals
+    loss_sig = jnp.sum((vmap(vmap(optax.sigmoid_binary_cross_entropy, in_axes=(0, 0)), in_axes=(0, 0))(pred_act, target_act)))/pred_act.size
 
-    loss_dict ={"dof": loss_dof, "act": loss_act}
-    return loss_dof + loss_act, loss_dict
+    # extra measure
+    p_act = jax.nn.sigmoid(pred_act)
+    p_act = (p_act > 0.5).astype(np.int32)
+    loss_match = 1 - jnp.mean((p_act == target_act).astype(jnp.float32))
+    # print and store
+    # jax.debug.print("\nTraining loss in dof: {}, sigmoid_bin_act: {}, matching_act: {}", loss_dof, loss_sig, loss_match)
+    loss_dict ={"dof": loss_dof, "sigmoid_bin_act": loss_sig, "matching_act": loss_match}
+    return loss_dof + loss_sig , loss_dict
 
 
 def train_dof_nn(save_every=10, epochs=200, num_train_samples_per_mask=100,
@@ -348,35 +391,34 @@ def train_dof_nn(save_every=10, epochs=200, num_train_samples_per_mask=100,
 
     # loaders for each data set
     g1 = torch.Generator().manual_seed(24)
-    train_dataloader = DataLoader(dataset, batch_size=batchsize, num_workers=4, pin_memory=True, shuffle=True, generator=g1)
+    train_dataloader = DataLoader(dataset, batch_size=batchsize, num_workers=10, pin_memory=True, shuffle=True, generator=g1)
 
     # test sample labels
-    # labels = jnp.array([[1, 0, 0, 0, 0, 0], [1, 0, 0, 1, 1, 0], [1, 0, 1, 0, 0, 0],
-    #                     [1, 1, 0, 0, 0, 1], [1, 1, 1, 0, 0, 0], [1, 1, 0, 0, 1, 1]])
     sampler = dof_sampler()
     sampler.sampler_config(num_samples=num_test_samples_per_mast, angle_tol=1e-2, dist_tol=1e-1)
     dof_batch, act_batch = vmap(sampler.sample_pose_from_activation, in_axes=(0, None))(action_lables, jax.random.PRNGKey(42))
-    dof_batch, act_batch = dof_batch.reshape(-1, 6), act_batch.reshape(-1, 6)
-    q_batch = vmap(dof_to_transformation, in_axes=0)(dof_batch)
+    q_batch = vmap(dof_to_transformation, in_axes=0)(dof_batch.reshape(-1, 6)).reshape(action_lables.shape[0], -1, 12)
 
-    def check_accuracy(model, dof, act, q, step, loss,  loss_dof, loss_act):
+    def check_accuracy(model, dof, act, q, step):
 
-        p_dof, p_act = vmap(model, in_axes=0)(q)
-        p_act = (p_act > 0.9).astype(np.int32)
-        acc_dof = np.linalg.norm(p_dof - dof)
-        epo_test_dof.append(acc_dof)
-        acc_act = np.mean(p_act == act) * 100
-        epo_test_act.append(acc_act)
-        print("\n step", step)
-        print("train dof/act loss", loss_dof, "and", loss_act)
-        print("test dof/act loss", acc_dof, "and accuracy", acc_act, "%")
+        p_dof, p_act = model(q)
+
+        loss__dof = np.linalg.norm(p_dof - dof)
+        epo_test_dof.append(loss__dof)
+
+        p_act = jax.nn.sigmoid(p_act)
+        p_act = (p_act > 0.5).astype(np.int32)
+        loss__act = 1 - np.mean((p_act == act).astype(jnp.float32))
+        epo_test_act.append(loss__act)
+
+        print("Step", step, "testing dof/act loss", loss__dof, "and loss in action", loss__act, "%")
 
     dict = {}
     dict['MLP_hidden_layers'] = 3
     dict['MLP_hidden_layer_width'] = 60
 
     # adam returns init_fun, update_fun, get_parameters
-    optimizer_init, optimizer_update, get_params = optimizers.adam(1e-3)
+    optimizer_init, optimizer_update, get_params = optimizers.adam(1e-3)   # TODO: Try sgd
     # opt_state tracks model optimization
     model = learn_link(dict)
     params, _ = eqx.partition(model, eqx.is_array)
@@ -388,6 +430,7 @@ def train_dof_nn(save_every=10, epochs=200, num_train_samples_per_mask=100,
         losses = []
         loss_dof = []
         loss_act = []
+        loss_matching = []
         for batch in train_loader:
             dof = jax.device_put(jnp.array(batch[0].numpy()))
             act = jax.device_put(jnp.array(batch[1].numpy()))
@@ -400,51 +443,54 @@ def train_dof_nn(save_every=10, epochs=200, num_train_samples_per_mask=100,
 
             losses.append(jax.device_get(loss))
             loss_dof.append(jax.device_get(loss_dict["dof"]))
-            loss_act.append(jax.device_get(loss_dict["act"]))
+            loss_act.append(jax.device_get(loss_dict["sigmoid_bin_act"]))
+            loss_matching.append(jax.device_get(loss_dict["matching_act"]))
             # re-build/update model from trainable and static parameters
             param = get_params(opt_state)
             model = eqx.combine(param, eqx.filter(model, lambda m: not eqx.is_array(m)))
 
-        return model, opt_state, losses, loss_dof, loss_act
+        return model, opt_state, losses, loss_dof, loss_act, loss_matching
 
     step = 0
 
     epo_loss_dof = []
     epo_loss_act = []
+    epo_loss_matching = []
 
     epo_test_dof = []
     epo_test_act = []
     path = "../output/dof_training"
     ensure_dir_exists(path)
     for epoch in tqdm(range(1, epochs + 1)):
-        model, opt_state, losses, loss_dof, loss_act = train_eposh(step, model, train_dataloader, opt_state)
-        loss = np.mean(losses)
-        loss_dof = np.mean(loss_dof)
-        loss_act = np.mean(loss_act)
-        epo_loss_dof.append(loss_dof)
-        epo_loss_act.append(loss_act)
-        check_accuracy(model, dof_batch, act_batch, q_batch, step, loss, loss_dof, loss_act)
-        step += 1
+        model, opt_state, losses, loss_dof, loss_sig, loss_matching = train_eposh(step, model, train_dataloader, opt_state)
+        epo_loss_dof.append(np.mean(loss_dof))
+        epo_loss_act.append(np.mean(loss_sig))
+        epo_loss_matching.append(np.mean(loss_matching))
 
+        print(f"\nTraining loss in dof: {np.mean(loss_dof)}, sigmoid_bin_act: {np.mean(loss_sig)}, matching_act: {np.mean(loss_matching)}" )
+        check_accuracy(model, dof_batch, act_batch, q_batch, step)
+        step += 1
         if epoch % save_every == 0:
             # save the model parameters as Pytree: .eqx
-
             eqx.tree_serialise_leaves(os.path.join(path, f"checkpoint_{epoch}_autoencoder.eqx"), model)
-
             # store the nn dict used to construct the autoencoder: .json
             with open(os.path.join(path, f'checkpoint_{epoch}.json'), 'w') as json_file:
                 json_file.write(json.dumps(dict))
 
     # Create 2x2 grid of subplots
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+    fig, axes = plt.subplots(2, 3, figsize=(10, 8))
     x = range(1, epochs + 1)
     # Top-left
     axes[0, 0].plot(x, epo_loss_dof)
     axes[0, 0].set_title("train loss dof")
 
-    # Top-right
+    # Top-mid
     axes[0, 1].plot(x, epo_loss_act, color='orange')
     axes[0, 1].set_title("train loss action")
+
+    # Top-right
+    axes[0, 2].plot(x, epo_loss_matching, color='blue')
+    axes[0, 2].set_title("train loss matching")
 
     # Bottom-left
     axes[1, 0].plot(x, epo_test_dof, color='green')
@@ -470,30 +516,34 @@ def load_model(dir, epoch, nn_type):
     with open(os.path.join(dir, f'checkpoint_{epoch}.json'), 'r') as json_file:
         model_dict = json.loads(json_file.read())
 
-    autoencoder = nn_type(model_dict)
-    _, params_static = eqx.partition(autoencoder, eqx.is_array)
+    model = nn_type(model_dict, training_phase=False)
+    _, params_static = eqx.partition(model, eqx.is_array)
 
     # load autoencoder parameters (optimized weights and bias) .json
-    model_params = eqx.tree_deserialise_leaves(os.path.join(dir, f"checkpoint_{epoch}_autoencoder.eqx"), autoencoder)
+    model_params = eqx.tree_deserialise_leaves(os.path.join(dir, f"checkpoint_{epoch}_autoencoder.eqx"), model)
 
-    return model_params, params_static
+    return model
+
 
 def main():
-    # train a nn to learn active DOFs
-    # train_dof_nn(save_every=10,
-    #              epochs=200,
-    #              num_train_samples_per_mask=100,
-    #              num_test_samples_per_mast=200,
-    #              batchsize=500)
+
+    pretrained = False
+    num_itr = 200
+    if not pretrained:
+        # train a nn to learn active DOFs
+        train_dof_nn(save_every=10,
+                     epochs=num_itr,
+                     num_train_samples_per_mask=800,
+                     num_test_samples_per_mast=200,
+                     batchsize=100)
 
     #  load nn from .eqx and test some FOM rigid bodies
-
     # Build command line arguments
     parser = argparse.ArgumentParser()
 
     # Shared arguments
     config.add_system_args(parser)
-    config.add_learning_args(parser) # Parse arguments
+    config.add_learning_args(parser)  # Parse arguments
     config.add_case_specific_arguments(parser)
     args = parser.parse_args()
 
@@ -502,16 +552,19 @@ def main():
 
     actor, nn_dict = read_snapshots(args)
 
-    epochs = 200
+    epochs = 750
     path = "../output/dof_training/"
-    model_params, model_static = load_model(path, epochs, nn_type=learn_link)
-    model = eqx.combine(model_params, model_static)
+    model = load_model(path, epochs, nn_type=learn_link)
 
     for bid in range(system.n_bodies):
-        p_dof, p_act = vmap(model, in_axes=0)(actor.bodies[bid].fullT)
-        p_act = np.sum((p_act > 0.9).astype(np.int32), axis=0)/actor.bodies[bid].fullT.shape[0]
+        # print("actor body:" + str(bid), "\n vals range", np.min(abs(actor.bodies[bid].dof), axis=0),
+        #       "\n", np.mean(abs(actor.bodies[bid].dof), axis=0),
+        #       "\n", np.amax(abs(actor.bodies[bid].dof), axis=0))
+        p_dof, p_act = model(actor.bodies[bid].fullT)
 
-        print("\n step", p_act)
+        probs = np.sum(abs(p_act), axis=0).astype(np.int32)
+
+        print("\n step", probs)
 
 
 if __name__ == '__main__':
