@@ -87,11 +87,11 @@ class character:
 
 def read_snapshots(args, store_npy=False):
     # Build the system object
-    system, system_def = config.construct_system_from_name(args.system_name, args.problem_name)
+    # system, system_def = config.construct_system_from_name(args.system_name, args.problem_name)
     case_extension= "numsnapshots_" + f"{args.numSnapshots:05d}"
 
     actor = character()
-    for bid in range(system.n_bodies):
+    for bid in range(args.n_bodies):
 
         link = body()
         link.one_body_dataFill(args, args.numSnapshots, file_patern_ext="_body_"+str(bid)+".npz")

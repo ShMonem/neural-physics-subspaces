@@ -13,6 +13,8 @@ def add_system_args(parser):
     # parser.add_argument("--problem_name", type=str, required=True)
     parser.add_argument("--system_name", type=str, default="rigid3d")   # adjust --
     parser.add_argument("--problem_name", type=str, default="one_joint")    # adjust --
+    parser.add_argument("--n_bodies", type=int, default=2)    # adjust --
+
     parser.add_argument("--timestep_h", type=float, default=0.05)
 
 

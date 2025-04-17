@@ -17,8 +17,8 @@ import utils
 def make_body(file, density, scale):
 
     v, f = igl.read_triangle_mesh(file)
-    v = scale*v
-
+    v = scale*v.astype(np.float64)
+    # l = igl.massmatrix(v,f).astype(np.float64)
     vol = igl.massmatrix(v,f).data
     vol = np.nan_to_num(vol) # massmatrix returns Nans in some stewart meshes
 

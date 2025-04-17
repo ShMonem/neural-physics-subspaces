@@ -29,7 +29,7 @@ FRAME = 1
 RECORD_FRAME = False          # store frames as .png
 RECORD_SNAPSHOTS = False     # store frames information as matrices .npz to be used for training
 NUM_SNAPSHOTS = 22222
-
+print("Device:", jax.devices())
 # colour=(0.0, 0.7, 0.2)   # change to preference
 def main():
     # Build command line arguments
@@ -63,13 +63,15 @@ def main():
     # Force jax to initialize itself so errors get thrown early
     _ = jnp.zeros(())
 
-    # Build the system object
-    system, system_def = config.construct_system_from_name(args.system_name, args.problem_name)
-
     # Initialize polyscope
     ps.set_verbosity(3)
     ps.init()
     ps.set_ground_plane_mode('none')
+
+    # Build the system object
+    system, system_def = config.construct_system_from_name(args.system_name, args.problem_name)
+
+
 
     #########################################################################
     ### Load subspace map (if given)
