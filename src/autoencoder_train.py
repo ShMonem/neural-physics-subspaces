@@ -154,7 +154,7 @@ def main():
     rng = random.PRNGKey(0)
     # Train the autoencoder
     model_train_dict = {}
-    epochs = 100
+    epochs = 500
 
     loader_input_index = 5  # for full transformations
     network_filename_dir = os.path.join(args.output_dir, args.problem_name, args.output_nn_dir)

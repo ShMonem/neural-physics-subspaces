@@ -34,7 +34,7 @@ def main():
 
     # Arguments specific to this program
     parser.add_argument("--integrator", type=str, default="implicit-proximal")
-    parser.add_argument("--subspace_model", type=str, default = "../output/bar/data_free_subspaces/neural_subspace_Cos_rigid3d_bar_normal_dim4_wexp1_final")
+    parser.add_argument("--subspace_model", type=str)#, default = "../output/bar/data_free_subspaces/neural_subspace_Cos_rigid3d_bar_normal_dim4_wexp1_final")
 
     # Parse arguments
     args = parser.parse_args()

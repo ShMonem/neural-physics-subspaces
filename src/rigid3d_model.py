@@ -8,10 +8,7 @@ import os
 import polyscope as ps
 import polyscope.imgui as psim
 
-try:
-    import igl
-finally:
-    print("WARNING: igl bindings not available")
+import igl
 
 import utils
 
